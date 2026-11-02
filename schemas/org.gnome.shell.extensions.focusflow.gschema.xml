@@ -21,10 +21,10 @@
       <description>Set once the default topics have been added, so they are not re-added after the user deletes them.</description>
     </key>
 
-    <key name="active-timer" type="s">
-      <default>''</default>
-      <summary>Running or paused timer</summary>
-      <description>JSON of the active timer, or empty when idle.</description>
+    <key name="timers" type="s">
+      <default>'{}'</default>
+      <summary>Running and paused timers</summary>
+      <description>JSON map of topic id to timer state. At most one timer is running; the others are paused.</description>
     </key>
 
     <key name="last-topic-id" type="s">

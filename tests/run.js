@@ -8,6 +8,8 @@ import {exit} from 'system';
 import * as Model from '../lib/topicsModel.js';
 import {migrateData, migrateSettings, SCHEMA_VERSION} from '../lib/migrate.js';
 import {isValidSession, parseSessionLines, SessionStore} from '../lib/sessionStore.js';
+import {TimerEngine} from '../lib/timerEngine.js';
+import * as TimerMath from '../lib/timerMath.js';
 import {TopicsStore} from '../lib/topicsStore.js';
 
 const ROOT = GLib.path_get_dirname(GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]));
@@ -365,6 +367,18 @@ test('SessionStore: connectChanged fires on load/append/rewrite, not after disco
     store.destroy();
 });
 
+test('SessionStore.destroy: queued writes still land', async () => {
+    const path = tmpPath('destroy.jsonl');
+    const store = new SessionStore(path);
+    const pending = [store.append(session(1)), store.append(session(2))];
+    store.destroy();
+    await Promise.all(pending);
+    const reread = new SessionStore(path);
+    await reread.load();
+    eq(reread.sessions.map(s => s.id), ['s1', 's2']);
+    reread.destroy();
+});
+
 test('SessionStore.monitor: reloads on external change, ignores own writes', async () => {
     const path = tmpPath('monitor.jsonl');
     const store = new SessionStore(path);
@@ -383,6 +397,278 @@ test('SessionStore.monitor: reloads on external change, ignores own writes', asy
     eq(store.sessions.map(s => s.id), ['s5', 's6']);
     other.destroy();
     store.destroy();
+});
+
+// ---- timerMath ----
+
+const T0 = 1_762_000_000_000;
+const MIN = 60_000;
+const study = {id: 'study', name: 'Study', minutes: 45};
+
+test('timerMath: start, remaining, progress, finishAt', () => {
+    const t = TimerMath.startTimer(study, T0);
+    eq([t.status, t.durationMs, t.remainingMsAtStart, t.topicName], ['running', 45 * MIN, 45 * MIN, 'Study']);
+    eq(TimerMath.remainingMs(t, T0 + 15 * MIN), 30 * MIN);
+    assert(Math.abs(TimerMath.progress(t, T0 + 15 * MIN) - 1 / 3) < 1e-9, 'progress 1/3');
+    eq(TimerMath.finishAt(t), T0 + 45 * MIN);
+    assert(!TimerMath.isFinished(t, T0 + 45 * MIN - 1));
+    assert(TimerMath.isFinished(t, T0 + 45 * MIN));
+    eq(TimerMath.remainingMs(t, T0 + 99 * MIN), 0);
+});
+
+test('timerMath: pause/resume keep remaining; gap and backwards clock add nothing', () => {
+    const t = TimerMath.startTimer(study, T0);
+    const p = TimerMath.pauseTimer(t, T0 + 10 * MIN);
+    eq([p.status, p.remainingMs, p.pausedAt, 'startedAt' in p], ['paused', 35 * MIN, T0 + 10 * MIN, false]);
+    eq(TimerMath.remainingMs(p, T0 + 500 * MIN), 35 * MIN);
+    eq(TimerMath.finishAt(p), null);
+    const r = TimerMath.resumeTimer(p, T0 + 60 * MIN);
+    eq([r.status, r.remainingMsAtStart, 'pausedAt' in r], ['running', 35 * MIN, false]);
+    eq(TimerMath.remainingMs(r, T0 + 50 * MIN), 35 * MIN, 'clock moved backwards');
+});
+
+test('timerMath.segmentToSession: partial, completed, too short, paused', () => {
+    const t = TimerMath.startTimer(study, T0);
+    eq(TimerMath.segmentToSession(t, T0 + 20_000, false, 'a'),
+        {id: 'a', topicId: 'study', topicName: 'Study', start: T0, end: T0 + 20_000, seconds: 20, completed: false});
+    const done = TimerMath.segmentToSession(t, T0 + 90 * MIN, true, 'b');
+    eq([done.end, done.seconds, done.completed], [T0 + 45 * MIN, 2700, true]);
+    eq(TimerMath.segmentToSession(t, T0 + 400, false, 'c'), null);
+    eq(TimerMath.segmentToSession(t, T0 - 5000, false, 'd'), null);
+    eq(TimerMath.segmentToSession(TimerMath.pauseTimer(t, T0 + MIN), T0 + 2 * MIN, false, 'e'), null);
+});
+
+test('timerMath.parseTimers: drops malformed entries, keeps one running', () => {
+    eq(TimerMath.parseTimers('nope'), {});
+    eq(TimerMath.parseTimers('[]'), {});
+    const a = TimerMath.startTimer({id: 'a', name: 'A', minutes: 10}, T0);
+    const b = TimerMath.startTimer({id: 'b', name: 'B', minutes: 10}, T0 + MIN);
+    const c = TimerMath.pauseTimer(TimerMath.startTimer({id: 'c', name: 'C', minutes: 10}, T0), T0 + 2 * MIN);
+    const parsed = TimerMath.parseTimers(JSON.stringify({
+        a, b, c, wrong: a, bad: {topicId: 'bad', status: 'running'},
+    }));
+    eq(Object.keys(parsed).sort(), ['a', 'b', 'c']);
+    eq(TimerMath.runningTimer(parsed).topicId, 'b');
+    eq([parsed.a.status, parsed.a.remainingMs], ['paused', 9 * MIN]);
+    eq(TimerMath.lastPausedTimer(parsed).topicId, 'c');
+});
+
+// ---- TimerEngine ----
+
+function makeEngine(name, {settings = memorySettings(), path = tmpPath(`${name}.jsonl`), clock} = {}) {
+    const topics = new TopicsStore(settings);
+    topics.seedIfNeeded();
+    const sessions = new SessionStore(path);
+    const time = clock ?? {now: T0};
+    const engine = new TimerEngine({settings, topics, sessions, now: () => time.now});
+    const finished = [];
+    engine.connect('finished', (_e, session, late) => finished.push({session, late}));
+    const id = n => topics.all.find(t => t.name === n).id;
+    // load() is queued behind pending appends, so it also waits for them.
+    const logged = async () => (await sessions.load(), sessions.sessions);
+    const done = () => {
+        engine.destroy();
+        sessions.destroy();
+    };
+    return {settings, topics, sessions, engine, time, finished, id, logged, done};
+}
+
+test('engine: start runs a topic and persists it', async () => {
+    const h = makeEngine('start');
+    let changes = 0;
+    h.engine.connect('changed', () => changes++);
+    h.engine.start(h.id('Study'));
+    eq(h.engine.running.topicId, h.id('Study'));
+    eq(h.engine.remainingMs(h.id('Study')), 45 * MIN);
+    eq(h.settings.get_string('last-topic-id'), h.id('Study'));
+    eq(Object.keys(JSON.parse(h.settings.get_string('timers'))), [h.id('Study')]);
+    eq(changes, 1);
+    throws(() => h.engine.start('ghost'), /No topic/);
+    h.done();
+});
+
+test('engine: pause logs the run; resume skips the paused gap', async () => {
+    const h = makeEngine('pause');
+    const s = h.id('Study');
+    h.engine.start(s);
+    h.time.now += 20_000;
+    h.engine.pause();
+    eq(h.engine.getTimer(s).status, 'paused');
+    eq(h.engine.remainingMs(s), 45 * MIN - 20_000);
+    h.time.now += 100 * MIN;
+    h.engine.start(s);
+    h.time.now += 10_000;
+    h.engine.pause(s);
+    eq(h.engine.remainingMs(s), 45 * MIN - 30_000);
+    eq((await h.logged()).map(x => [x.seconds, x.completed]), [[20, false], [10, false]]);
+    h.done();
+});
+
+test('engine: starting another topic pauses the current one; each keeps progress', async () => {
+    const h = makeEngine('switch');
+    const [s, b] = [h.id('Study'), h.id('Break')];
+    h.engine.start(s);
+    h.time.now += 5 * MIN;
+    h.engine.start(b);
+    eq([h.engine.getTimer(s).status, h.engine.running.topicId], ['paused', b]);
+    h.time.now += MIN;
+    h.engine.start(s);
+    eq([h.engine.getTimer(b).status, h.engine.running.topicId], ['paused', s]);
+    eq(h.engine.remainingMs(s), 40 * MIN);
+    eq(h.engine.remainingMs(b), 4 * MIN);
+    h.engine.start(s);
+    eq(h.engine.remainingMs(s), 40 * MIN, 'start on the running topic is a no-op');
+    eq((await h.logged()).map(x => [x.topicName, x.seconds]), [['Study', 300], ['Break', 60]]);
+    h.done();
+});
+
+test('engine: reset logs a running segment, not a paused one', async () => {
+    const h = makeEngine('reset');
+    const [s, b] = [h.id('Study'), h.id('Break')];
+    h.engine.start(s);
+    h.time.now += 30_000;
+    h.engine.reset(s);
+    eq(h.engine.getTimer(s), null);
+    h.engine.start(b);
+    h.time.now += 30_000;
+    h.engine.pause();
+    h.engine.reset(b);
+    h.engine.reset('nothing-here');
+    eq(h.engine.timers, {});
+    eq((await h.logged()).map(x => [x.topicName, x.seconds]), [['Study', 30], ['Break', 30]]);
+    h.done();
+});
+
+test('engine: finish is logged at the exact end time, even if noticed late', async () => {
+    const h = makeEngine('finish');
+    const b = h.id('Break');
+    h.engine.start(b);
+    h.time.now += 5 * MIN + 500;
+    assert(h.engine.checkFinished());
+    eq(h.engine.timers, {});
+    eq(h.finished.length, 1);
+    eq([h.finished[0].session.end, h.finished[0].session.completed, h.finished[0].late], [T0 + 5 * MIN, true, false]);
+    h.engine.start(b);
+    h.time.now += 60 * MIN;
+    h.engine.pause();
+    eq(h.engine.timers, {}, 'pause after the end finishes instead');
+    eq(h.finished[1].late, true);
+    eq((await h.logged()).map(x => [x.seconds, x.completed]), [[300, true], [300, true]]);
+    eq(h.settings.get_string('last-topic-id'), b);
+    h.done();
+});
+
+test('engine: state survives a restart (disable/enable, logout)', async () => {
+    const settings = memorySettings();
+    const clock = {now: T0};
+    const path = tmpPath('restart.jsonl');
+    const first = makeEngine('restart', {settings, clock, path});
+    const [s, g] = [first.id('Study'), first.id('Gaming')];
+    first.engine.start(g);
+    clock.now += 10 * MIN;
+    first.engine.start(s);
+    first.done();
+
+    clock.now += 20 * MIN;
+    const second = makeEngine('restart', {settings, clock, path});
+    eq(second.engine.running.topicId, s);
+    eq(second.engine.remainingMs(s), 25 * MIN);
+    eq(second.engine.remainingMs(g), 20 * MIN);
+    assert(!second.engine.checkFinished());
+    second.done();
+
+    clock.now += 60 * MIN;
+    const third = makeEngine('restart', {settings, clock, path});
+    assert(third.engine.checkFinished());
+    eq([third.finished[0].session.end, third.finished[0].late], [T0 + 10 * MIN + 45 * MIN, true]);
+    eq(Object.keys(third.engine.timers), [g]);
+    eq((await third.logged()).map(x => [x.topicName, x.seconds, x.completed]),
+        [['Gaming', 600, false], ['Study', 2700, true]]);
+    third.done();
+});
+
+test('engine: deleting a topic drops its timer (running segment logged)', async () => {
+    const h = makeEngine('delete');
+    const [s, b] = [h.id('Study'), h.id('Break')];
+    h.engine.start(b);
+    h.time.now += MIN;
+    h.engine.start(s);
+    h.time.now += 2 * MIN;
+    h.topics.delete(s);
+    h.topics.delete(b);
+    eq(h.engine.timers, {});
+    eq((await h.logged()).map(x => [x.topicName, x.seconds]), [['Break', 60], ['Study', 120]]);
+    h.done();
+});
+
+test('engine: editing minutes only affects the next start', () => {
+    const h = makeEngine('minutes');
+    const s = h.id('Study');
+    h.engine.start(s);
+    h.topics.update(s, {minutes: 10});
+    eq(h.engine.remainingMs(s), 45 * MIN);
+    h.engine.reset(s);
+    h.engine.start(s);
+    eq(h.engine.remainingMs(s), 10 * MIN);
+    h.done();
+});
+
+test('engine.toggle: pause, resume last paused, else last topic, else first visible', () => {
+    const h = makeEngine('toggle');
+    const [s, b, g] = [h.id('Study'), h.id('Break'), h.id('Gaming')];
+    h.engine.toggle();
+    eq(h.engine.running.topicId, s, 'idle with no history starts the first visible topic');
+    h.engine.reset(s);
+    h.settings.set_string('last-topic-id', g);
+    h.engine.toggle();
+    eq(h.engine.running.topicId, g, 'idle starts the last used topic');
+    h.engine.toggle();
+    eq(h.engine.running, null, 'running gets paused');
+    h.time.now += MIN;
+    h.engine.start(b);
+    h.engine.toggle();
+    h.engine.toggle();
+    eq(h.engine.running.topicId, b, 'resumes the most recently paused');
+    h.done();
+});
+
+test('engine tick: finishes on the real main loop and stops ticking', async () => {
+    const h = makeEngine('tick');
+    let ticks = 0;
+    h.engine.connect('tick', () => ticks++);
+    h.engine.start(h.id('Break'));
+    await sleep(1100);
+    assert(ticks >= 1, 'ticked while running');
+    h.time.now += 5 * MIN;
+    await waitFor(() => h.finished.length === 1, 3000);
+    eq(h.engine._tickId, 0);
+    h.done();
+});
+
+test('engine tick: a finished handler can start the next timer (auto-chain)', async () => {
+    const h = makeEngine('chain');
+    const [s, b] = [h.id('Study'), h.id('Break')];
+    h.engine.connect('finished', () => h.engine.start(b));
+    h.engine.start(s);
+    h.time.now += 45 * MIN;
+    await waitFor(() => h.finished.length === 1, 3000);
+    eq(h.engine.running.topicId, b);
+    assert(h.engine._tickId !== 0, 'new tick source for the chained timer');
+    let ticks = 0;
+    h.engine.connect('tick', () => ticks++);
+    await sleep(2200);
+    assert(ticks >= 1 && ticks <= 3, `exactly one tick source, got ${ticks} ticks in 2.2 s`);
+    h.done();
+});
+
+test('engine.destroy: removes the tick and the topics handler', () => {
+    const h = makeEngine('destroy');
+    h.engine.start(h.id('Study'));
+    h.engine.destroy();
+    eq(h.engine._tickId, 0);
+    h.topics.delete(h.id('Study'));
+    eq(Object.keys(h.engine.timers).length, 1, 'no longer reacts to topic changes');
+    h.sessions.destroy();
 });
 
 // ---- runner ----

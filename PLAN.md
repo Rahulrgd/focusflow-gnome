@@ -11,7 +11,7 @@
 |----|-----------------------------------------------|----------------|-------|
 | 0  | Setup & skeleton                              | ✅ Done        | Enable/disable/re-enable + prefs window verified in headless shell; real-session check pending |
 | 1  | Data layer (topics, sessions, pure modules)   | ✅ Done        | 28 unit tests pass; seeding, add, append, external reload, re-enable verified in headless shell |
-| 2  | Timer engine                                  | ⬜ Not started |       |
+| 2  | Timer engine                                  | ✅ Done        | 45 unit tests pass; 1-min finish, pause, disable/enable verified in headless shell |
 | 3  | Panel indicator + Section 1 (Timers)          | ⬜ Not started |       |
 | 4  | Preferences: Manage Topics (Section 2)        | ⬜ Not started |       |
 | 5  | Stats & graph (Section 3)                     | ⬜ Not started |       |
@@ -76,12 +76,12 @@ Timer chalte waqt panel me icon ke saath countdown dikhta hai (jaise `Study 23:4
 - Delete-history aur import poori file dobara likhte hain (temp file + rename, `Gio.File.replace_contents`). Extension `Gio.FileMonitor` se file change dekh kar apna cache reload karta hai.
 
 **D3. Timer timestamps par chalega, ticks par nahi**
-- Running: `{ topicId, status: "running", startedAt, remainingMsAtStart, durationMs }` → remaining = `remainingMsAtStart - (Date.now() - startedAt)`.
-- Paused: `{ topicId, status: "paused", remainingMs, durationMs }`.
-- Ye state GSettings key `active-timer` me save hoti hai. Shell restart, extension disable/enable ya logout ke baad bhi timer sahi jagah se chalega.
-- 1-second `GLib.timeout_add_seconds` sirf UI redraw aur finish check ke liye hai. GLib ke timeouts suspend ke dauran ruk jaate hain, isliye har tick par **wall-clock** (`Date.now()`) se check karte hain ki timer khatam hua ya nahi.
+- Running: `{ topicId, topicName, status: "running", durationMs, startedAt, remainingMsAtStart }` → remaining = `remainingMsAtStart - (Date.now() - startedAt)`.
+- Paused: `{ topicId, topicName, status: "paused", durationMs, remainingMs, pausedAt }`.
+- Ye state GSettings key `timers` me save hoti hai (topic id → timer ka map). Shell restart, extension disable/enable ya logout ke baad bhi timer sahi jagah se chalega.
+- 1-second `GLib.timeout_add` sirf UI redraw aur finish check ke liye hai. GLib ke timeouts suspend ke dauran ruk jaate hain, isliye har tick par **wall-clock** (`Date.now()`) se check karte hain ki timer khatam hua ya nahi.
 
-**D4. Ek waqt par ek hi timer.** Doosra topic start karne par pehla wala pause ho jata hai, aur uska ab tak ka time log ho jata hai.
+**D4. Ek waqt par ek hi timer *chalega*, par har topic apna paused progress rakhega.** Doosra topic start karne par pehla wala pause ho jata hai (uska ab tak ka time log hota hai), aur wapas aane par wahin se resume hota hai. Isliye state ek `active-timer` nahi, balki `timers` map hai: har topic ki ek entry, unme se max ek `running`. *(Phase 2 me badla: pehle sirf ek `active-timer` tha, jisse switch karne par pichhle topic ka progress kho jata.)*
 
 **D5. Session har "run segment" par log hoga**
 - Jab bhi timer rukta hai (pause, reset, doosra topic start, ya finish), us segment ka actual chala hua time ek session entry me jata hai.
@@ -124,7 +124,7 @@ focusflow/
 │   ├── indicator.js          # PanelMenu.Button, panel label, menu sections jodna
 │   ├── timerList.js          # Section 1: topic rows (name, minutes entry, buttons, progress)
 │   ├── statsView.js          # Section 3: tabs, ‹ › navigation, summary, bars
-│   ├── timerEngine.js        # start/pause/resume/reset, tick, finish, signals
+│   ├── timerEngine.js        # start/pause/reset/toggle, tick, finish, signals (GObject)
 │   ├── sessionStore.js       # sessions.jsonl: append, read, rewrite, file monitor
 │   ├── topicsStore.js        # GSettings 'topics' JSON <-> objects, seed defaults
 │   ├── notifier.js           # MessageTray source, notifications + actions, sound
@@ -158,7 +158,7 @@ focusflow/
 | `schema-version`          | `i`  | `1`                  | Data migrations ke liye |
 | `topics`                  | `s`  | `'[]'`               | Topics ka JSON array (neeche dekho) |
 | `seeded`                  | `b`  | `false`              | Default topics ek baar hi add hon |
-| `active-timer`            | `s`  | `''`                 | Running/paused timer ka JSON, ya empty |
+| `timers`                  | `s`  | `'{}'`               | Topic id → running/paused timer ka JSON map (max ek running) |
 | `last-topic-id`           | `s`  | `''`                 | Shortcut se kaunsa topic resume/start ho |
 | `sound-enabled`           | `b`  | `true`               | Finish par sound |
 | `notifications-enabled`   | `b`  | `true`               | Finish par notification |
@@ -176,8 +176,9 @@ focusflow/
 // GSettings 'topics' (JSON string)
 [{ id, name, minutes, color: "#e66100", hidden: false, order: 0, dailyGoalMinutes: null }]
 
-// GSettings 'active-timer' (JSON string ya '')
-{ topicId, status: "running" | "paused", startedAt, remainingMsAtStart, remainingMs, durationMs }
+// GSettings 'timers' (JSON map; idle topics ki entry nahi hoti)
+{ "<topicId>": { topicId, topicName, status: "running", durationMs, startedAt, remainingMsAtStart },
+  "<topicId>": { topicId, topicName, status: "paused",  durationMs, remainingMs, pausedAt } }
 
 // ~/.local/share/focusflow/sessions.jsonl (har line ek JSON object)
 { "id": "…", "topicId": "…", "topicName": "Study", "start": 1762070400000,
@@ -238,19 +239,29 @@ IDs `GLib.uuid_string_random()` se banenge. Default topics: Study 45, Break 5, G
 ### Phase 2 — Timer engine
 **Goal:** UI ke bina, ek sahi chalne wala timer jo restart ke baad bhi apni jagah se chale.
 
-- [ ] `timerMath.js` (pure): `remainingMs(timer, now)`, `isFinished(timer, now)`, `finishAt(timer)`, `segmentToSession(timer, topic, now, completed)` + unit tests
-- [ ] `timerEngine.js` (GObject, signals: `changed`, `finished`):
-  - [ ] `start(topicId)`: koi aur chal raha hai toh pehle use pause + log karo
-  - [ ] `pause()`: segment log (`completed: false`), `remainingMs` save
-  - [ ] `resume()`: naya `startedAt`
-  - [ ] `reset(topicId)`: chal raha tha toh segment log, phir `active-timer = ''`
-  - [ ] 1 s tick sirf jab timer running ho; tick par `Date.now()` se finish check
-  - [ ] Finish: segment `completed: true` (end = `finishAt`, `now` nahi), `last-topic-id` set, `finished` signal
-- [ ] `enable()` par `active-timer` padho: running hai aur time nikal chuka hai → finish ko sahi end time ke saath log karo; baaki → tick dobara shuru
-- [ ] `disable()` par saare GLib sources aur signal handlers hatao (review requirement)
-- [ ] Decide: chalte timer ke minutes badle toh kya ho → **sirf agle start par lagega** (default)
+- [x] `timerMath.js` (pure): `remainingMs`, `progress`, `finishAt`, `isFinished`, `startTimer`, `pauseTimer`, `resumeTimer`, `segmentToSession`, `parseTimers`, `runningTimer`, `lastPausedTimer` + unit tests
+- [x] `timerEngine.js` (GObject, signals: `changed`, `tick`, `finished(session, late)`):
+  - [x] `start(topicId)`: koi aur chal raha hai toh pehle use pause + log karo; paused topic par `start` = resume
+  - [x] `pause()`: segment log (`completed: false`), `remainingMs` save
+  - [x] Resume: `start()` hi karta hai, naya `startedAt`
+  - [x] `reset(topicId)`: chal raha tha toh segment log, phir us topic ki entry hatao
+  - [x] 1 s tick sirf jab timer running ho; tick par `Date.now()` se finish check
+  - [x] Finish: segment `completed: true` (end = `finishAt`, `now` nahi), `last-topic-id` set, `finished` signal
+  - [x] `toggle()` (shortcut ke liye): running → pause · warna sabse recent paused → resume · warna last topic → start · warna pehla visible topic
+  - [x] Topic delete hua → uska timer hatao (running tha toh segment log)
+- [x] `enable()` par `timers` padho → `checkFinished()`: time nikal chuka hai toh sahi end time ke saath finish (`late = true`); baaki tick dobara shuru
+- [x] `disable()` par tick source aur topics signal handler hatao (review requirement)
+- [x] Decide: chalte timer ke minutes badle toh kya ho → **sirf agle start par lagega** (`durationMs` start par fix)
 
 **Done when:** Looking Glass se 1 minute ka timer start karo, aur wo khatam hone par `sessions.jsonl` me `completed: true` aaye. 20 s baad pause karo → 20 s ka `completed: false` session aaye. Timer chalte hue extension disable/enable karo → remaining time sahi rahe.
+
+**Result (2026-11-02):** `gjs -m tests/run.js` → 45 passed (3 baar). Unit tests me fake clock se: pause/resume gap, topic switch, reset, late finish, restart (3 engine instances, ek hi settings), topic delete, minutes edit, toggle ke 4 cases, asli main loop par tick se finish, `finished` handler se agla timer start (auto-chain) aur `destroy()`. Isolated headless shell me asli time ke saath: 1-min timer khud finish hua (60 s, `completed`, `late: false`, tick source band); 20 s pause → 280 s bache; resume → disable 5 s → enable, timer chalta raha aur remaining wall-clock ke hisaab se ~6 s kam. `sessions.jsonl`: `Quick 60 s completed`, `Break 20 s partial`, `Break 10 s partial`. Shell log me koi JS error nahi.
+
+**Notes:**
+- **Data-loss bug mila aur fix hua:** `SessionStore.destroy()` cancellable cancel karta tha, jisse queue me pada append bhi cancel ho jata. Matlab pause ke turant baad logout/disable hua toh wo session kho jata. Ab sirf reads cancellable hain; writes hamesha poore hote hain (test: "queued writes still land").
+- `checkFinished()` constructor me nahi chalta, taaki `finished` signal tab aaye jab koi sun raha ho (Phase 6 me restart ke baad wala notification isi par).
+- Disable ke dauran timer "chalta" rehta hai (wall clock), kyunki disable kuch log nahi karta. Lock screen par disable hota hi nahi (`unlock-dialog`).
+- Tick source apne callback ke andar se bhi safely band/replace hota hai (finish ke turant baad auto-chain wala case).
 
 ---
 
@@ -265,7 +276,7 @@ IDs `GLib.uuid_string_random()` se banenge. Default topics: Study 45, Break 5, G
   - [ ] Active row: highlight, `MM:SS` countdown, neeche patli progress bar
   - [ ] Button states: running me ▶ ki jagah ⏸; paused topic par ▶ = resume
 - [ ] Bahut topics hon toh Section 1 `St.ScrollView` me (max height ~ 6 rows)
-- [ ] Topics ya `active-timer` badle (prefs se bhi) toh rows re-render
+- [ ] Topics badle (prefs se bhi) ya engine `changed` de toh rows re-render; countdown engine ke `tick` par
 - [ ] Empty state: "No visible topics — open Manage Topics"
 - [ ] **Section 2:** "⚙ Manage Topics…" item → `this._extension.openPreferences()`, menu band ho
 - [ ] Panel par middle-click → pause/resume (chhota bonus)
@@ -498,3 +509,4 @@ Asli desktop ko chhue bina, alag XDG dirs ke saath:
 | 2026-11-02 | —     | Plan bana (Chrome version se GNOME Shell extension par switch) |
 | 2026-11-02 | 0     | Skeleton: metadata, extension.js, prefs.js, schema (14 keys), icon, scripts. Headless me verified |
 | 2026-11-02 | 1     | topicsModel, topicsStore, sessionStore (JSONL), migrate, 28 unit tests. Headless me verified |
+| 2026-11-02 | 2     | timerMath + TimerEngine, `active-timer` → `timers` map, destroy() data-loss fix, 45 unit tests. Headless me verified |
