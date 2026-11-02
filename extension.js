@@ -129,11 +129,16 @@ export default class FocusFlowExtension extends Extension {
     }
 
     disable() {
-        // Locking the screen can also disable and re-enable this extension:
-        // GNOME does that to every extension enabled after one without
-        // lock-screen support. Timer state is saved in GSettings and based on
-        // the wall clock, so timers carry on across that and any real
-        // disable/enable.
+        // session-modes includes "unlock-dialog" so a timer that runs out while
+        // the screen is locked still plays its chime and shows its
+        // notification. On the lock screen the indicator is hidden
+        // (Indicator.syncSessionMode) and the shortcut is inactive (its
+        // ActionMode excludes the lock screen); nothing else is shown there.
+        //
+        // Locking can also disable and re-enable this extension (GNOME does
+        // that to every extension enabled after one without lock-screen
+        // support). Timer state is saved in GSettings and based on the wall
+        // clock, so timers carry on across that and any real disable/enable.
         Gio.DBus.system.signal_unsubscribe(this._sleepSignalId);
         this._sleepSignalId = 0;
         Main.wm.removeKeybinding('toggle-timer');

@@ -12,6 +12,7 @@ gnome-extensions pack "$ROOT" \
     --extra-source="$ROOT/prefs" \
     --extra-source="$ROOT/icons" \
     --extra-source="$ROOT/sounds" \
+    --extra-source="$ROOT/LICENSE" \
     --schema="$ROOT/schemas/org.gnome.shell.extensions.focusflow.gschema.xml"
 
 ls -l "$ROOT"/dist/*.zip

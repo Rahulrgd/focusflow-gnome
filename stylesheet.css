@@ -10,14 +10,6 @@
   font-feature-settings: "tnum";
 }
 
-.focusflow-icon-running {
-  color: -st-accent-color;
-}
-
-.focusflow-icon-paused {
-  opacity: 0.55;
-}
-
 .focusflow-timer-scroll {
   max-height: 22em;
   margin: 0 8px;
