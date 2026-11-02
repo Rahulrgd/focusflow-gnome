@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.focusflow"
+          path="/org/gnome/shell/extensions/focusflow/">
+
+    <key name="schema-version" type="i">
+      <default>1</default>
+      <summary>Data schema version</summary>
+      <description>Used to migrate stored topics and sessions between versions.</description>
+    </key>
+
+    <key name="topics" type="s">
+      <default>'[]'</default>
+      <summary>Topics</summary>
+      <description>JSON array of {id, name, minutes, color, hidden, order, dailyGoalMinutes}.</description>
+    </key>
+
+    <key name="seeded" type="b">
+      <default>false</default>
+      <summary>Default topics added</summary>
+      <description>Set once the default topics have been added, so they are not re-added after the user deletes them.</description>
+    </key>
+
+    <key name="active-timer" type="s">
+      <default>''</default>
+      <summary>Running or paused timer</summary>
+      <description>JSON of the active timer, or empty when idle.</description>
+    </key>
+
+    <key name="last-topic-id" type="s">
+      <default>''</default>
+      <summary>Last used topic</summary>
+      <description>Topic started by the shortcut when no timer is active.</description>
+    </key>
+
+    <key name="sound-enabled" type="b">
+      <default>true</default>
+      <summary>Play a sound when a timer finishes</summary>
+    </key>
+
+    <key name="notifications-enabled" type="b">
+      <default>true</default>
+      <summary>Show a notification when a timer finishes</summary>
+    </key>
+
+    <key name="panel-show-countdown" type="b">
+      <default>true</default>
+      <summary>Show the topic and countdown in the top panel</summary>
+    </key>
+
+    <key name="week-start" type="s">
+      <choices>
+        <choice value="mon"/>
+        <choice value="sun"/>
+      </choices>
+      <default>'mon'</default>
+      <summary>First day of the week for weekly stats</summary>
+    </key>
+
+    <key name="stats-period" type="s">
+      <choices>
+        <choice value="daily"/>
+        <choice value="weekly"/>
+        <choice value="monthly"/>
+        <choice value="all"/>
+      </choices>
+      <default>'daily'</default>
+      <summary>Last selected stats tab</summary>
+    </key>
+
+    <key name="auto-chain-enabled" type="b">
+      <default>false</default>
+      <summary>Start another topic automatically when a timer finishes</summary>
+    </key>
+
+    <key name="auto-chain-from" type="as">
+      <default>[]</default>
+      <summary>Topic IDs that trigger the auto-chain</summary>
+    </key>
+
+    <key name="auto-chain-to" type="s">
+      <default>''</default>
+      <summary>Topic ID started by the auto-chain</summary>
+    </key>
+
+    <key name="toggle-timer" type="as">
+      <default><![CDATA[['<Super><Alt>p']]]></default>
+      <summary>Pause or resume the timer</summary>
+    </key>
+
+  </schema>
+</schemalist>

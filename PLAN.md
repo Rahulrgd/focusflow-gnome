@@ -9,7 +9,7 @@
 
 | #  | Phase                                         | Status         | Notes |
 |----|-----------------------------------------------|----------------|-------|
-| 0  | Setup & skeleton                              | ⬜ Not started |       |
+| 0  | Setup & skeleton                              | ✅ Done        | Enable/disable/re-enable + prefs window verified in headless shell; real-session check pending |
 | 1  | Data layer (topics, sessions, pure modules)   | ⬜ Not started |       |
 | 2  | Timer engine                                  | ⬜ Not started |       |
 | 3  | Panel indicator + Section 1 (Timers)          | ⬜ Not started |       |
@@ -192,15 +192,17 @@ IDs `GLib.uuid_string_random()` se banenge. Default topics: Study 45, Break 5, G
 ### Phase 0 — Setup & skeleton
 **Goal:** Ek khali extension jo nested session me enable ho jaye aur bina error ke disable ho jaye.
 
-- [ ] `metadata.json` (`uuid`, `name`, `description`, `shell-version: ["46"]`, `session-modes`, `settings-schema`, `url`, `version-name`)
-- [ ] ESM `extension.js`: `export default class FocusFlowExtension extends Extension { enable() {} disable() {} }`
-- [ ] ESM `prefs.js`: `ExtensionPreferences` + `fillPreferencesWindow()` ek khali page ke saath
-- [ ] GSettings schema XML me upar ki saari keys, phir `glib-compile-schemas schemas/`
-- [ ] `scripts/install.sh`, `scripts/nested.sh`, `scripts/pack.sh` (background-music-player wale scripts jaise)
-- [ ] `.gitignore`: `schemas/gschemas.compiled`, `*.zip`, `dist/`
-- [ ] Symbolic panel icon `icons/focusflow-symbolic.svg`
+- [x] `metadata.json` (`uuid`, `name`, `description`, `shell-version: ["46"]`, `session-modes`, `settings-schema`, `url`, `version-name`)
+- [x] ESM `extension.js`: `export default class FocusFlowExtension extends Extension { enable() {} disable() {} }`
+- [x] ESM `prefs.js`: `ExtensionPreferences` + `fillPreferencesWindow()` ek khali page ke saath
+- [x] GSettings schema XML me upar ki saari keys, phir `glib-compile-schemas schemas/`
+- [x] `scripts/install.sh`, `scripts/nested.sh`, `scripts/pack.sh` (background-music-player wale scripts jaise)
+- [x] `.gitignore`: `schemas/gschemas.compiled`, `*.zip`, `dist/`
+- [x] Symbolic panel icon `icons/focusflow-symbolic.svg`
 
 **Done when:** Nested session me `gnome-extensions enable focusflow@rahulrgd.github.io` chale, `gnome-extensions prefs …` window khule, aur `journalctl` me koi error na aaye.
+
+**Result (2026-11-02):** Isolated headless shell (alag XDG dirs + keyfile settings, asli desktop untouched) me `ACTIVE → INACTIVE → ACTIVE` sahi chala, log me sirf `enabled (schema v1)` / `disabled`, koi JS error nahi. `prefs.js` GJS harness me load hua: window visible, settings bound, Topics page mila. Schema `glib-compile-schemas --strict` se pass, `scripts/pack.sh` zip bana. Asli session me (`./scripts/install.sh` + logout/login) check baaki.
 
 ---
 
@@ -426,6 +428,14 @@ dconf dump /org/gnome/shell/extensions/focusflow/
 tail -n 5 ~/.local/share/focusflow/sessions.jsonl
 ```
 
+### Headless test (bina GUI ke)
+Asli desktop ko chhue bina, alag XDG dirs ke saath:
+- `XDG_DATA_HOME`/`XDG_CONFIG_HOME` ko temp folders par, `GSETTINGS_BACKEND=keyfile`, aur keyfile me `enabled-extensions` pehle se set
+- `XDG_RUNTIME_DIR` chhota path rakho (jaise `/run/user/1000/ff-test`), kyunki Wayland socket path 108 bytes se lamba nahi ho sakta
+- `dbus-run-session -- gnome-shell --headless --wayland --virtual-monitor 1280x720`, phir `gnome-extensions info/enable/disable`
+- Shell ke andar JS chalana ho toh `--unsafe-mode` + `org.gnome.Shell.Eval`
+- Prefs: GJS harness `prefs.js` ko seedha import karta hai (`GI_TYPELIB_PATH=/usr/lib/gnome-shell/girepository-1.0`, Extensions gresource register karke), headless shell sirf display ke liye
+
 ### Release zip
 ```bash
 ./scripts/pack.sh
@@ -476,3 +486,4 @@ tail -n 5 ~/.local/share/focusflow/sessions.jsonl
 | Date       | Phase | Notes |
 |------------|-------|-------|
 | 2026-11-02 | —     | Plan bana (Chrome version se GNOME Shell extension par switch) |
+| 2026-11-02 | 0     | Skeleton: metadata, extension.js, prefs.js, schema (14 keys), icon, scripts. Headless me verified |

@@ -1,0 +1,15 @@
+{
+  "uuid": "focusflow@rahulrgd.github.io",
+  "name": "FocusFlow",
+  "description": "Pomodoro-style timers and time tracking from the top panel.\n\n- One timer per topic (Study, Break, Gaming, ...) with play, pause and reset\n- Manage topics: add, edit, hide, delete and reorder\n- Daily, weekly and monthly stats per topic\n- Notification and sound when a timer finishes\n- Keeps running across lock screen, suspend and logout",
+  "shell-version": [
+    "46"
+  ],
+  "session-modes": [
+    "user",
+    "unlock-dialog"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.focusflow",
+  "url": "https://github.com/Rahulrgd/focusflow",
+  "version-name": "0.1.0"
+}
