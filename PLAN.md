@@ -19,7 +19,7 @@
 | 7  | Settings, auto-chain, shortcut, daily goal    | ✅ Done        | 30 prefs checks + real 1-min auto-start, Start Break, goal ✓, shortcut (virtual keyboard) verified headless |
 | 8  | Export / Import                               | ✅ Done        | 66 unit tests; 14 Backup-page checks + clear-timers shell test via scripts/headless.sh; file pickers manual check pending |
 | 9  | Lock screen, suspend, robustness & polish     | ✅ Done        | Lock-screen finish, overdue-after-suspend, broken files, 30k sessions, Tab nav, 10× enable cycles, ZorinBlue-Dark verified headless; real suspend/lock pending |
-| 10 | Packaging, testing & release                  | ⬜ Not started |       |
+| 10 | Packaging, testing & release                  | 🟨 In progress | Zip, README, LICENSE, v1.0.0, fresh-install smoke test done; real-session checks + tag pending |
 
 Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⛔ Blocked
 
@@ -463,39 +463,51 @@ Manual check baaki: asli suspend/resume aur asli screen lock (headless me sirf s
 ---
 
 ### Phase 10 — Packaging, testing & release
-- [ ] `scripts/pack.sh` → `dist/focusflow@rahulrgd.github.io.shell-extension.zip` (`--extra-source` lib, prefs, sounds, icons; `--schema`)
-- [ ] `README.md`: features, screenshot, install, shortcut, backup, logs
-- [ ] `LICENSE` (GPL-2.0-or-later, background-music-player jaisa)
-- [ ] Fresh install test: zip se `gnome-extensions install`, logout/login, enable
-- [ ] Neeche wale saare test cases pass
-- [ ] `version-name: "1.0.0"`, git tag `v1.0.0`
+- [x] `scripts/pack.sh` → `dist/focusflow@rahulrgd.github.io.shell-extension.zip` (28 files, 54 KB: code, prefs, schema, icon, sound, stylesheet; tests/docs/scripts nahi)
+- [x] `README.md`: features, screenshots, install, usage, settings, data, lock screen, development (English, background-music-player jaisa)
+- [x] `LICENSE` (GPL-2.0, background-music-player jaisa)
+- [x] Fresh install test: `gnome-extensions install` temp `XDG_DATA_HOME` me (files + `gschemas.compiled` bane) → us installed copy ko headless shell me chalaya: v1.0.0 ACTIVE, default topics, menu, timer finish (notification + installed `done.oga`), prefs window, 0 JS errors
+- [ ] Asli session: `./scripts/install.sh` (ya zip install) → logout/login → enable → neeche wale "Real" column ke checks
+- [x] Neeche wale saare test cases headless me pass
+- [x] `version-name: "1.0.0"`
+- [ ] git tag `v1.0.0` (asli session check ke baad)
 
-#### Manual test cases
+#### Test cases
 
-| #  | Test | Expected | Pass |
-|----|------|----------|------|
-| 1  | 1-min timer start, menu band, wait | Notification + sound; session `completed: true` | [ ] |
-| 2  | Timer chalte hue logout/login | Sahi remaining time se continue | [ ] |
-| 3  | Timer chalte hue screen lock | Lock par bhi finish par sound; indicator lock screen par nahi dikhe | [ ] |
-| 4  | Timer chalte hue suspend, phir resume | Overdue timer turant finish, sahi end time | [ ] |
-| 5  | A start, phir B start | A pause + partial session log; B running | [ ] |
-| 6  | 30 s baad pause, phir reset | 30 s ka partial session; timer idle | [ ] |
-| 7  | Menu me minutes edit | Save; agle start par lage | [ ] |
-| 8  | Prefs me drag aur ▲/▼ se reorder | Order save, menu turant update | [ ] |
-| 9  | History wale topic ko hide | Section 1 se gayab; graph me dikhe | [ ] |
-| 10 | Delete + keep history | Graph me "(deleted) Name" | [ ] |
-| 11 | Delete + delete history | Graph se hat jaye | [ ] |
-| 12 | Daily / Weekly / Monthly / All tabs | Totals raw sessions se match | [ ] |
-| 13 | ‹ › navigation | Sahi ranges; week start ka dhyan | [ ] |
-| 14 | Panel label running / paused / idle | `Study 23:41` / `⏸ …` / sirf icon | [ ] |
-| 15 | Auto-chain Study → Break | Break khud start ho | [ ] |
-| 16 | Shortcut, menu band | Pause/resume toggle | [ ] |
-| 17 | Export → wipe → import | Data same wapas | [ ] |
-| 18 | Galat file import | Saaf error, data same | [ ] |
-| 19 | Light aur dark theme | Dono me readable | [ ] |
-| 20 | Extension disable/enable 10 baar | Koi leak/duplicate indicator nahi, journal saaf | [ ] |
+Headless = `scripts/headless.sh` / test harness me verified (phase likha hai). Real = asli Zorin session me haath se.
 
----
+| #  | Test | Expected | Headless | Real |
+|----|------|----------|----------|------|
+| 1  | 1-min timer start, menu band, wait | Notification + sound; session `completed: true` | ✅ Ph 2, 6 | [ ] chime suno |
+| 2  | Timer chalte hue logout/login | Sahi remaining time se continue | ✅ Ph 2 (disable/enable, restart) | [ ] |
+| 3  | Timer chalte hue screen lock | Lock par bhi finish par sound; indicator lock screen par nahi dikhe | ✅ Ph 9 (unlock-dialog mode) | [ ] |
+| 4  | Timer chalte hue suspend, phir resume | Overdue timer turant finish, sahi end time | ✅ Ph 9 (wall clock jump) | [ ] |
+| 5  | A start, phir B start | A pause + partial session log; B running | ✅ Ph 2, 3 | — |
+| 6  | 30 s baad pause, phir reset | 30 s ka partial session; timer idle | ✅ Ph 2, 3 | — |
+| 7  | Menu me minutes edit | Save; agle start par lage | ✅ Ph 2, 3 | — |
+| 8  | Prefs me drag aur ▲/▼ se reorder | Order save, menu turant update | ✅ Ph 4 (drop handler + ▲▼) | [ ] mouse se drag |
+| 9  | History wale topic ko hide | Section 1 se gayab; graph me dikhe | ✅ Ph 3, 4, 5 | — |
+| 10 | Delete + keep history | Graph me grey italic naam | ✅ Ph 4, 5 | — |
+| 11 | Delete + delete history | Graph se hat jaye | ✅ Ph 4 | — |
+| 12 | Daily / Weekly / Monthly / All tabs | Totals raw sessions se match | ✅ Ph 5 | — |
+| 13 | ‹ › navigation | Sahi ranges; week start ka dhyan | ✅ Ph 5 (3 timezones) | — |
+| 14 | Panel label running / paused / idle | `Study 23:41` / `⏸ …` / sirf icon | ✅ Ph 3, 6 | — |
+| 15 | Auto-chain Study → Break | Break khud start ho | ✅ Ph 7 | — |
+| 16 | Shortcut, menu band | Pause/resume toggle | ✅ Ph 7 (virtual keyboard) | [ ] asli keyboard |
+| 17 | Export → wipe → import | Data same wapas | ✅ Ph 8 | [ ] file chooser |
+| 18 | Galat file import | Saaf error, data same | ✅ Ph 8 | — |
+| 19 | Light aur dark theme | Dono me readable | ✅ Ph 9 (default + ZorinBlue-Dark) | [ ] |
+| 20 | Extension disable/enable 10 baar | Koi leak/duplicate indicator nahi, journal saaf | ✅ Ph 9 | — |
+
+**Asli session ka checklist (aapke liye):**
+1. `./scripts/install.sh`, phir logout/login, phir `gnome-extensions enable focusflow@rahulrgd.github.io`
+2. Panel me stopwatch icon; menu kholo, ek topic ke minutes `1` karke ▶; menu band karke 1 min ruko → chime + notification
+3. Ek timer chalate hue screen lock (`Super+L`), khatam hone do → lock par bhi chime
+4. Ek timer chalate hue laptop suspend, timer ke time se zyada baad me kholo → notification "Ended at …"
+5. Manage Topics me ek row ko mouse se drag karke dusri jagah chhodo
+6. `Super+Alt+P` se pause/resume
+7. Backup page: Export → file save dialog; Import → wahi file chuno → Merge
+8. `journalctl -b -o cat /usr/bin/gnome-shell | grep -i focusflow` → koi error nahi
 
 ## 4. Development & Testing Workflow
 
@@ -613,3 +625,4 @@ Script andar se ye recipe follow karti hai (alag XDG dirs, asli desktop ko chhue
 | 2026-11-02 | 7     | Settings page, auto-start, Start Break, shortcut, daily goal; 4 prefs bugs fixed; leaked ibus-daemons band kiye, ab `scripts/headless.sh` |
 | 2026-11-02 | 8     | Backup page (JSON/CSV export, import Merge/Replace, Reset), lib/backup.js, clear-timers, transform(); 66 unit + 14 harness checks |
 | 2026-11-02 | 9     | Resume-from-suspend hook, topic-specific accessible names; lock/suspend/broken-file/perf/keyboard/dark-theme checks headless |
+| 2026-11-02 | 10    | README, LICENSE, v1.0.0, zip (28 files); fresh install + headless smoke test of the installed copy; test table filled; real-session checks + tag pending |
