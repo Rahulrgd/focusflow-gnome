@@ -15,7 +15,7 @@
 | 3  | Panel indicator + Section 1 (Timers)          | ✅ Done        | Menu driven in headless shell (11 checks) + screenshots (docs/menu.png); real-session check pending |
 | 4  | Preferences: Manage Topics (Section 2)        | ✅ Done        | 12 prefs harness checks + menu→window and cross-process delete verified in headless shell; real drag pending |
 | 5  | Stats & graph (Section 3)                     | ✅ Done        | 57 unit tests (3 timezones); seeded history driven in headless shell + screenshots |
-| 6  | Notifications, sound & panel label            | ⬜ Not started |       |
+| 6  | Notifications, sound & panel label            | ✅ Done        | 58 unit tests; real finish, late finish, DND, off switches, icon-only panel verified headless; audible check pending |
 | 7  | Settings, auto-chain, shortcut, daily goal    | ⬜ Not started |       |
 | 8  | Export / Import                               | ⬜ Not started |       |
 | 9  | Lock screen, suspend, robustness & polish     | ⬜ Not started |       |
@@ -138,10 +138,11 @@ focusflow/
 │   ├── settingsPage.js       # sound, notifications, week start, auto-chain, shortcut
 │   └── backupPage.js         # export JSON/CSV, import (replace/merge)
 ├── sounds/
-│   └── done.oga
+│   └── done.oga              # apna chime, scripts/make-sound.py se bana
 ├── docs/
 │   ├── menu.png              # README ke liye screenshot (panel menu, teeno sections)
-│   └── prefs.png             # README ke liye screenshot (Manage Topics)
+│   ├── prefs.png             # README ke liye screenshot (Manage Topics)
+│   └── notification.png      # README ke liye screenshot (finish banner)
 ├── icons/
 │   └── focusflow-symbolic.svg
 ├── schemas/
@@ -151,6 +152,7 @@ focusflow/
 └── scripts/
     ├── install.sh            # schemas compile + ~/.local/share/gnome-shell/extensions me symlink
     ├── nested.sh             # nested Wayland session
+    ├── make-sound.py         # sounds/done.oga generate karta hai (ffmpeg/libvorbis)
     └── pack.sh               # gnome-extensions pack → dist/
 ```
 
@@ -359,15 +361,23 @@ Study ▶ → row highlight, countdown `44:58`, panel `Study 44:58` · Break ▶
 ### Phase 6 — Notifications, sound & panel label
 **Goal:** Timer khatam hone par saaf feedback.
 
-- [ ] `notifier.js`: GNOME 46 API → `new MessageTray.Source({ title: 'FocusFlow', iconName })`, `Main.messageTray.add(source)`, `new MessageTray.Notification({ source, title, body })`
-- [ ] Finish par: "Study finished — 45 min logged" (`notifications-enabled` ka dhyan)
-- [ ] Notification actions: **Start Break** (agar auto-chain ka break topic set hai) · **Restart**
-- [ ] Sound: `sounds/done.oga` play, fallback theme sound `complete` (`sound-enabled` ka dhyan)
-- [ ] Panel label: running `Study 23:41` · paused `⏸ Study 12:05` · idle sirf icon; `panel-show-countdown` off ho toh sirf icon + chhota dot
-- [ ] Label ki fixed width (tabular numbers) taaki panel hilta na rahe
-- [ ] `disable()` par notification source destroy
+- [x] `notifier.js`: GNOME 46 API → `new MessageTray.Source({title: 'FocusFlow', icon})`, `Main.messageTray.add(source)`, `new MessageTray.Notification({source, title, body, urgency: HIGH})`, `source.addNotification()`
+- [x] Finish par: "Study finished" + "1h 30m of Study today" (aaj ka total, sirf aakhri segment nahi); late finish par "Ended at 14:32 · …" (system ka 12h/24h format) (`notifications-enabled` ka dhyan)
+- [x] Notification action: **Start Again** · **Start Break** Phase 7 me (auto-chain ke saath)
+- [x] Sound: apna chime `sounds/done.oga` (`scripts/make-sound.py` se bana, koi third-party license nahi), file na mile toh theme ka `complete` (`sound-enabled` ka dhyan)
+- [x] Sound notification se alag bajta hai, isliye notifications off ya Do Not Disturb me bhi bajta hai (sirf FocusFlow ki "sound" setting se band hota hai)
+- [x] Panel label: running `Study 23:41` · paused `⏸ Study 12:05` · idle sirf icon *(Phase 3 me bana)*; `panel-show-countdown` off → sirf icon: running par accent color, paused par dim
+- [x] Label me tabular numbers (`tnum`), taaki digits badalne par chaudai na hile
+- [x] `disable()` par notification source destroy
 
 **Done when:** Menu band ho tab bhi timer khatam hone par notification aaye, sound baje, aur panel label sahi countdown dikhaye. Zorin ka Do Not Disturb on ho toh banner na aaye, par notification list me dikhe.
+
+**Result (2026-11-02):** Unit tests 58 passed. Headless shell me (sound player par counter laga kar, kyunki headless me audio nahi):
+asli 1-min timer khud khatam → `done.oga` baja, banner "Quick finished / 1m of Quick today" (urgency HIGH, action "Start Again") · Start Again → naya 1-min timer · extension band hote hue timer khatam (shell restart jaisa) → enable par "Ended at 20:49 · 2m of Quick today" + chime · sound aur notifications off → kuch nahi baja/dikha, session phir bhi log · Do Not Disturb → banner nahi, list me notification · countdown off → icon running/paused class, label hidden · disable → FocusFlow ka source hata. Shell log me koi JS error nahi. Screenshot: `docs/notification.png`. Asli speaker par chime sunna baaki.
+
+**Notes:**
+- **Bug mila:** enable ke turant baad (late finish) history abhi load ho rahi hoti thi, isliye "today" total galat (2m ki jagah 1m) aata tha. Ab sound turant bajta hai, notification `SessionStore.flush()` ke baad banta hai.
+- Notification ki apni sound sirf banner dikhne par bajti hai; isliye sound `global.display.get_sound_player()` se khud bajate hain.
 
 ---
 
@@ -549,3 +559,4 @@ Asli desktop ko chhue bina, alag XDG dirs ke saath:
 | 2026-11-02 | 3     | Panel indicator, timer rows, format.js, stylesheet; menu headless me chala kar + screenshots se verified |
 | 2026-11-02 | 4     | Manage Topics page (add/edit/drag/▲▼/hide/delete), purge-topic-ids, 49 unit + 12 prefs checks, headless verified |
 | 2026-11-02 | 5     | stats.js + StatsView (tabs, ‹ ›, bars, live), color palette, BinLayout y_expand fix, 57 unit tests (3 TZ), headless verified |
+| 2026-11-02 | 6     | Notifier (banner, Start Again, late finish), apna chime, icon-only panel mode, flush() fix, 58 unit tests, headless verified |

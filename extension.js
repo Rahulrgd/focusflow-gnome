@@ -3,6 +3,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {Indicator} from './lib/indicator.js';
 import {migrateSettings} from './lib/migrate.js';
+import {Notifier} from './lib/notifier.js';
 import {SessionStore} from './lib/sessionStore.js';
 import {TimerEngine} from './lib/timerEngine.js';
 import {TopicsStore} from './lib/topicsStore.js';
@@ -37,6 +38,18 @@ export default class FocusFlowExtension extends Extension {
         Main.panel.addToStatusArea(this.uuid, this._indicator, 0, 'right');
         this._indicator.syncSessionMode();
 
+        // Before checkFinished(), so a timer that ended while the shell was not
+        // running still gets its notification.
+        this._notifier = new Notifier({
+            settings: this._settings,
+            engine: this._engine,
+            topics: this._topics,
+            sessions: this._sessions,
+            name: this.metadata.name,
+            iconPath: `${this.path}/icons/focusflow-symbolic.svg`,
+            soundPath: `${this.path}/sounds/done.oga`,
+        });
+
         this._settings.connectObject('changed::purge-topic-ids', () => this._purgeTopics(), this);
         this._purgeTopics();
 
@@ -65,6 +78,8 @@ export default class FocusFlowExtension extends Extension {
         // the wall clock, so timers carry on across that and any real
         // disable/enable.
         this._settings.disconnectObject(this);
+        this._notifier.destroy();
+        this._notifier = null;
         this._indicator.destroy();
         this._indicator = null;
         this._engine.destroy();

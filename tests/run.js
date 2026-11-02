@@ -411,6 +411,17 @@ test('SessionStore.removeTopics: drops only those topics, keeps outside writes',
     [store, other, reread].forEach(s => s.destroy());
 });
 
+test('SessionStore.flush: waits for queued loads and writes', async () => {
+    const path = tmpPath('flush.jsonl');
+    GLib.file_set_contents(path, `${JSON.stringify(session(1))}\n`);
+    const store = new SessionStore(path);
+    store.load();
+    store.append(session(2));
+    await store.flush();
+    eq(store.sessions.map(s => s.id), ['s1', 's2']);
+    store.destroy();
+});
+
 test('SessionStore.monitor: reloads on external change, ignores own writes', async () => {
     const path = tmpPath('monitor.jsonl');
     const store = new SessionStore(path);
