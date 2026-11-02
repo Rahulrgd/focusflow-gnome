@@ -12,7 +12,7 @@
 | 0  | Setup & skeleton                              | ✅ Done        | Enable/disable/re-enable + prefs window verified in headless shell; real-session check pending |
 | 1  | Data layer (topics, sessions, pure modules)   | ✅ Done        | 28 unit tests pass; seeding, add, append, external reload, re-enable verified in headless shell |
 | 2  | Timer engine                                  | ✅ Done        | 45 unit tests pass; 1-min finish, pause, disable/enable verified in headless shell |
-| 3  | Panel indicator + Section 1 (Timers)          | ⬜ Not started |       |
+| 3  | Panel indicator + Section 1 (Timers)          | ✅ Done        | Menu driven in headless shell (11 checks) + screenshots (docs/menu.png); real-session check pending |
 | 4  | Preferences: Manage Topics (Section 2)        | ⬜ Not started |       |
 | 5  | Stats & graph (Section 3)                     | ⬜ Not started |       |
 | 6  | Notifications, sound & panel label            | ⬜ Not started |       |
@@ -139,6 +139,8 @@ focusflow/
 │   └── backupPage.js         # export JSON/CSV, import (replace/merge)
 ├── sounds/
 │   └── done.oga
+├── docs/
+│   └── menu.png              # README ke liye screenshot
 ├── icons/
 │   └── focusflow-symbolic.svg
 ├── schemas/
@@ -268,20 +270,31 @@ IDs `GLib.uuid_string_random()` se banenge. Default topics: Study 45, Break 5, G
 ### Phase 3 — Panel indicator + Section 1 (Timers)
 **Goal:** Menu se timers chala sakein.
 
-- [ ] `indicator.js`: `PanelMenu.Button`, icon + label (idle me sirf icon), `Main.panel.addToStatusArea(uuid, …, 0, 'right')`
-- [ ] Menu me teen sections + `PopupSeparatorMenuItem` (Section 3 abhi placeholder)
-- [ ] `timerList.js`: har visible topic (order se) ki row, custom `PopupBaseMenuItem`:
-  - [ ] Color dot · Name · minutes `St.Entry` · ▶ / ⏸ · ↺ (`St.Button` + symbolic icons)
-  - [ ] Minutes entry: sirf digits, Enter ya focus-out par validate + save, galat value par purani value wapas
-  - [ ] Active row: highlight, `MM:SS` countdown, neeche patli progress bar
-  - [ ] Button states: running me ▶ ki jagah ⏸; paused topic par ▶ = resume
-- [ ] Bahut topics hon toh Section 1 `St.ScrollView` me (max height ~ 6 rows)
-- [ ] Topics badle (prefs se bhi) ya engine `changed` de toh rows re-render; countdown engine ke `tick` par
-- [ ] Empty state: "No visible topics — open Manage Topics"
-- [ ] **Section 2:** "⚙ Manage Topics…" item → `this._extension.openPreferences()`, menu band ho
-- [ ] Panel par middle-click → pause/resume (chhota bonus)
+- [x] `indicator.js`: `PanelMenu.Button`, icon + label (idle me sirf icon), `Main.panel.addToStatusArea(uuid, …, 0, 'right')`
+- [x] Menu me teen sections + `PopupSeparatorMenuItem` (Section 3 abhi placeholder)
+- [x] `timerList.js`: har visible topic (order se) ki row (`St.BoxLayout`, `PopupMenuSection` ke andar `St.ScrollView` me):
+  - [x] Color dot · Name · minutes `St.Entry` · ▶ / ⏸ · ↺ (`St.Button` + symbolic icons)
+  - [x] Minutes entry: sirf digits, Enter ya focus-out par validate + save, galat value par purani value wapas
+  - [x] Active row: highlight, `MM:SS` countdown, neeche patli progress bar (topic ke color me)
+  - [x] Button states: running me ▶ ki jagah ⏸; paused topic par ▶ = resume; idle me ↺ dim aur disabled
+- [x] Bahut topics hon toh Section 1 `St.ScrollView` me (`max-height: 22em`)
+- [x] Topics badle (prefs se bhi) ya engine `changed` de toh rows update; order/visible set badle tabhi rebuild (warna entry ka focus na toote); countdown engine ke `tick` par, sirf jab menu khula ho
+- [x] Empty state: "No visible topics"
+- [x] **Section 2:** "Manage Topics…" item → `openPreferences()`, menu band ho
+- [x] Panel par middle-click → `engine.toggle()`
+- [x] Panel label: running `Study 23:41`, paused `⏸ Study 12:05` (sabse recent paused), idle sirf icon *(Phase 6 se pehle hi basic version)*
+- [x] Lock screen par indicator hide (`Main.sessionMode` `updated`)
+- [x] `lib/format.js`: `formatClock` ("45:00", "1:30:00", round up) + `formatDuration` ("2h 15m", Phase 5 ke liye) + tests
 
 **Done when:** Menu se kisi bhi topic ko run/pause/reset kar sakein. Menu band karke dobara kholne par sahi remaining time dikhe. Doosra topic start karne par pehla pause ho jaye.
+
+**Result (2026-11-02):** Unit tests 47 passed. Isolated headless shell me menu ko Eval se chalaya (buttons ko `clicked` emit, entry me text + `activate`):
+Study ▶ → row highlight, countdown `44:58`, panel `Study 44:58` · Break ▶ → Study paused (`Resume`, 44:58 bacha), panel `Break 05:00` · Break ⏸ → panel `⏸ Break 04:59` · Study ↺ → entry wapas `45` · Gaming minutes `12` save, `0`/`999` reject hokar `12` wapas, letters type nahi hote · menu band/khol → paused time same · YouTube hide → 3 rows, naya topic → turant row, sab hide → "No visible topics" · lock-screen mode → indicator hidden, menu band · disable/enable → ek hi indicator, paused Break bacha. Shell log me koi JS error nahi. Screenshot: `docs/menu.png`. Asli session me (asli mouse/keyboard, Zorin theme) check baaki; "Manage Topics…" ka window Phase 4 me test hoga.
+
+**Notes:**
+- Pehle rows ko non-reactive `PopupBaseMenuItem` me rakha tha (music player jaisa), par St non-reactive widget ko `:insensitive` mark karta hai aur theme andar ka saara text grey kar deta hai. Isliye `PopupMenuSection` use kiya.
+- Normal (reactive) menu item hover par key focus le leta hai, jo minutes entry me type karte waqt focus chheen leta. Rows menu items nahi hain, isliye ye problem nahi aati.
+- `St.Button` ka `clicked` signal ek argument (mouse button) leta hai; test me `emit('clicked', 1)`.
 
 ---
 
@@ -510,3 +523,4 @@ Asli desktop ko chhue bina, alag XDG dirs ke saath:
 | 2026-11-02 | 0     | Skeleton: metadata, extension.js, prefs.js, schema (14 keys), icon, scripts. Headless me verified |
 | 2026-11-02 | 1     | topicsModel, topicsStore, sessionStore (JSONL), migrate, 28 unit tests. Headless me verified |
 | 2026-11-02 | 2     | timerMath + TimerEngine, `active-timer` → `timers` map, destroy() data-loss fix, 45 unit tests. Headless me verified |
+| 2026-11-02 | 3     | Panel indicator, timer rows, format.js, stylesheet; menu headless me chala kar + screenshots se verified |

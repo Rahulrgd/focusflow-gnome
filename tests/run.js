@@ -5,6 +5,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import {exit} from 'system';
 
+import {formatClock, formatDuration} from '../lib/format.js';
 import * as Model from '../lib/topicsModel.js';
 import {migrateData, migrateSettings, SCHEMA_VERSION} from '../lib/migrate.js';
 import {isValidSession, parseSessionLines, SessionStore} from '../lib/sessionStore.js';
@@ -669,6 +670,25 @@ test('engine.destroy: removes the tick and the topics handler', () => {
     h.topics.delete(h.id('Study'));
     eq(Object.keys(h.engine.timers).length, 1, 'no longer reacts to topic changes');
     h.sessions.destroy();
+});
+
+// ---- format ----
+
+test('formatClock: pads, rounds up, shows hours when needed', () => {
+    eq(formatClock(45 * MIN), '45:00');
+    eq(formatClock(45 * MIN - 1), '45:00');
+    eq(formatClock(299_001), '05:00');
+    eq(formatClock(299_000), '04:59');
+    eq(formatClock(1), '00:01');
+    eq(formatClock(0), '00:00');
+    eq(formatClock(-5), '00:00');
+    eq(formatClock(90 * MIN), '1:30:00');
+    eq(formatClock(600 * MIN), '10:00:00');
+});
+
+test('formatDuration', () => {
+    eq([0, 30, 59.6, 60, 2700, 3600, 8100, 36000].map(formatDuration),
+        ['0s', '30s', '1m', '1m', '45m', '1h', '2h 15m', '10h']);
 });
 
 // ---- runner ----

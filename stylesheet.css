@@ -1,0 +1,86 @@
+/* Neutral greys as translucent rgba so they read on light and dark shell themes. */
+
+.focusflow-menu {
+  min-width: 340px;
+  max-width: 420px;
+}
+
+.focusflow-panel-label {
+  padding-left: 4px;
+  font-feature-settings: "tnum";
+}
+
+.focusflow-timer-scroll {
+  max-height: 22em;
+  margin: 0 8px;
+}
+
+.focusflow-timer-list {
+  spacing: 2px;
+}
+
+.focusflow-row {
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+
+.focusflow-row-running {
+  background-color: rgba(127, 127, 127, 0.18);
+}
+
+.focusflow-row-paused .focusflow-clock {
+  color: rgba(127, 127, 127, 1);
+}
+
+.focusflow-row-line {
+  spacing: 8px;
+}
+
+.focusflow-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+}
+
+.focusflow-minutes {
+  width: 3.5em;
+  min-height: 0;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+
+.focusflow-unit {
+  font-size: 0.9em;
+  color: rgba(127, 127, 127, 1);
+}
+
+.focusflow-clock {
+  font-weight: bold;
+  font-feature-settings: "tnum";
+}
+
+.focusflow-button {
+  padding: 6px;
+  border-radius: 99px;
+}
+
+.focusflow-button:hover,
+.focusflow-button:focus {
+  background-color: rgba(127, 127, 127, 0.25);
+}
+
+.focusflow-progress {
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background-color: rgba(127, 127, 127, 0.25);
+}
+
+.focusflow-progress-fill {
+  border-radius: 2px;
+}
+
+.focusflow-empty {
+  padding: 8px;
+  color: rgba(127, 127, 127, 1);
+}

@@ -1,5 +1,7 @@
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import {Indicator} from './lib/indicator.js';
 import {migrateSettings} from './lib/migrate.js';
 import {SessionStore} from './lib/sessionStore.js';
 import {TimerEngine} from './lib/timerEngine.js';
@@ -22,13 +24,28 @@ export default class FocusFlowExtension extends Extension {
             topics: this._topics,
             sessions: this._sessions,
         });
+
+        this._indicator = new Indicator({
+            engine: this._engine,
+            topics: this._topics,
+            name: this.metadata.name,
+            iconPath: `${this.path}/icons/focusflow-symbolic.svg`,
+            openPreferences: () => this.openPreferences(),
+        });
+        Main.panel.addToStatusArea(this.uuid, this._indicator, 0, 'right');
+        this._indicator.syncSessionMode();
+
         this._engine.checkFinished();
     }
 
     disable() {
-        // session-modes includes unlock-dialog, so locking the screen keeps the
-        // extension (and running timers) enabled. Timer state is saved in
-        // GSettings, so a real disable/enable resumes where it left off.
+        // Locking the screen can also disable and re-enable this extension:
+        // GNOME does that to every extension enabled after one without
+        // lock-screen support. Timer state is saved in GSettings and based on
+        // the wall clock, so timers carry on across that and any real
+        // disable/enable.
+        this._indicator.destroy();
+        this._indicator = null;
         this._engine.destroy();
         this._engine = null;
         this._sessions.destroy();
