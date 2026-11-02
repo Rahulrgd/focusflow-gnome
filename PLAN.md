@@ -10,7 +10,7 @@
 | #  | Phase                                         | Status         | Notes |
 |----|-----------------------------------------------|----------------|-------|
 | 0  | Setup & skeleton                              | ✅ Done        | Enable/disable/re-enable + prefs window verified in headless shell; real-session check pending |
-| 1  | Data layer (topics, sessions, pure modules)   | ⬜ Not started |       |
+| 1  | Data layer (topics, sessions, pure modules)   | ✅ Done        | 28 unit tests pass; seeding, add, append, external reload, re-enable verified in headless shell |
 | 2  | Timer engine                                  | ⬜ Not started |       |
 | 3  | Panel indicator + Section 1 (Timers)          | ⬜ Not started |       |
 | 4  | Preferences: Manage Topics (Section 2)        | ⬜ Not started |       |
@@ -131,6 +131,7 @@ focusflow/
 │   ├── timerMath.js          # (pure) remaining, finished?, segment → session
 │   ├── stats.js              # (pure) period ranges, prev/next, aggregate
 │   ├── topicsModel.js        # (pure) validate, reorder, add/update/delete helpers
+│   ├── migrate.js            # SCHEMA_VERSION, migrateData() (import ke liye bhi), migrateSettings()
 │   └── format.js             # (pure) "MM:SS", "2h 15m", period labels
 ├── prefs/
 │   ├── topicsPage.js         # list, drag reorder, ▲▼, edit dialog, hide, delete dialog
@@ -209,19 +210,28 @@ IDs `GLib.uuid_string_random()` se banenge. Default topics: Study 45, Break 5, G
 ### Phase 1 — Data layer (topics, sessions, pure modules)
 **Goal:** Saara data padhna/likhna bharosemand ho, aur pure logic ke unit tests pass hon.
 
-- [ ] `topicsModel.js` (pure): `validateTopic`, `addTopic`, `updateTopic`, `deleteTopic`, `reorder(idsInOrder)`, `toggleHidden`, `visibleSorted`
+- [x] `topicsModel.js` (pure): `validateTopic`, `addTopic`, `updateTopic`, `deleteTopic`, `reorder(idsInOrder)`, `toggleHidden`, `visibleSorted`
   - Name: trim, empty nahi, duplicate nahi (case-insensitive) · minutes: integer 1–600 · color: valid hex
-- [ ] `topicsStore.js`: GSettings `topics` ⇄ array, `changed::topics` signal, pehli baar `seeded = false` ho toh defaults daalo
-- [ ] `sessionStore.js`:
-  - [ ] `~/.local/share/focusflow/` folder banao (`GLib.get_user_data_dir()`)
-  - [ ] `append(session)`: async, `Gio.File.append_to_async`, ek line
-  - [ ] `loadAll()`: file padh kar parse karo, kharab line skip + warning
-  - [ ] `rewrite(sessions)`: temp + rename (`replace_contents_async`)
-  - [ ] `Gio.FileMonitor` → `changed` signal (prefs ne file badli toh cache reload)
-- [ ] `schema-version` + `migrate()` (v1 me no-op, par wired)
-- [ ] `tests/run.js`: chhota assert helper + `topicsModel` ke tests
+- [x] `topicsStore.js`: GSettings `topics` ⇄ array, `changed::topics` signal, pehli baar `seeded = false` ho toh defaults daalo
+- [x] `sessionStore.js`:
+  - [x] `~/.local/share/focusflow/` folder banao (`GLib.get_user_data_dir()`)
+  - [x] `append(session)`: async, `Gio.File.append_to_async`, ek line (`GLib.Bytes` ke saath, neeche note dekho)
+  - [x] `loadAll()`: file padh kar parse karo, kharab line skip + warning
+  - [x] `rewrite(sessions)`: temp + rename (`replace_contents_async`)
+  - [x] `Gio.FileMonitor` → `changed` signal (prefs ne file badli toh cache reload)
+- [x] `schema-version` + `migrate()` (v1 me no-op, par wired) → `lib/migrate.js`, `enable()` me call hota hai
+- [x] `tests/run.js`: chhota assert helper + `topicsModel` ke tests
 
 **Done when:** `gjs -m tests/run.js` pass ho. Looking Glass (`Alt+F2` → `lg`) se topics add/edit karne par `dconf read /org/gnome/shell/extensions/focusflow/topics` me sahi JSON dikhe, aur ek test session `sessions.jsonl` me likha jaye.
+
+**Result (2026-11-02):** `gjs -m tests/run.js` → 28 passed (5 baar chala, flaky nahi). Isolated headless shell me: 4 default topics seed hue, `seeded = true`; `add()` ka topic dconf me gaya; `append()` se `sessions.jsonl` me 1 line; bahar se file rewrite karne par cache 3 s ke andar reload hua; disable/enable ke baad 5 topics + 2 sessions bache, defaults dobara nahi aaye. Shell log me koi JS error nahi. Looking Glass wala manual check asli session me baaki.
+
+**Notes (jo implement karte waqt pata chala):**
+- GJS ka `write_all_async` JS buffer ko write khatam hone tak zinda nahi rakhta. 50 parallel appends me 6 lines kharab hui thi. Fix: `GLib.Bytes` + `write_bytes_async`.
+- Khali `GLib.Bytes` GIO ko NULL buffer jaisa milta hai aur write kabhi complete nahi hota (`rewrite([])` hang). Fix: khali file ke liye `replace_async` stream khol kar band karna.
+- `replace_contents_bytes_async` ka finish function `replace_contents_finish` hai, `_promisify` ko naam dena padta hai.
+- Apne writes se aane wale FileMonitor events size + mtime "stamp" se pehchane jaate hain, taaki apne hi append par dobara reload na ho.
+- GJS me `console` read-only hai, tests me stub nahi ho sakta. Expected warnings test output me dikhti hain.
 
 ---
 
@@ -487,3 +497,4 @@ Asli desktop ko chhue bina, alag XDG dirs ke saath:
 |------------|-------|-------|
 | 2026-11-02 | —     | Plan bana (Chrome version se GNOME Shell extension par switch) |
 | 2026-11-02 | 0     | Skeleton: metadata, extension.js, prefs.js, schema (14 keys), icon, scripts. Headless me verified |
+| 2026-11-02 | 1     | topicsModel, topicsStore, sessionStore (JSONL), migrate, 28 unit tests. Headless me verified |

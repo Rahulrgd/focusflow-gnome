@@ -8,6 +8,7 @@ mkdir -p "$ROOT/dist"
 gnome-extensions pack "$ROOT" \
     --force \
     --out-dir="$ROOT/dist" \
+    --extra-source="$ROOT/lib" \
     --extra-source="$ROOT/icons" \
     --schema="$ROOT/schemas/org.gnome.shell.extensions.focusflow.gschema.xml"
 
