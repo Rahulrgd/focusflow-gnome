@@ -18,8 +18,9 @@ export function acceleratorLabel(accel) {
 }
 
 /** Sound, notifications, panel, stats, auto-start and shortcut settings. */
-export const SettingsPage = GObject.registerClass(
-class SettingsPage extends Adw.PreferencesPage {
+export const SettingsPage = GObject.registerClass({
+    GTypeName: 'FocusFlowSettingsPage',
+}, class SettingsPage extends Adw.PreferencesPage {
     _init({window, settings, topics}) {
         super._init({title: 'Settings', icon_name: 'preferences-system-symbolic'});
         this._window = window;

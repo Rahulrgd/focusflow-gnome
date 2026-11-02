@@ -933,6 +933,33 @@ test('engine.forgetAll: drops every timer, logs nothing', async () => {
     h.done();
 });
 
+// ---- GObject type names ----
+
+test('every GObject class has a unique FocusFlow GTypeName', () => {
+    // Without one, GJS derives the name from file path + class name, and
+    // another extension with lib/indicator.js `Indicator` broke enabling.
+    const files = ['extension.js', 'prefs.js'];
+    for (const dir of ['lib', 'prefs']) {
+        const e = Gio.File.new_for_path(`${ROOT}/${dir}`).enumerate_children('standard::name', 0, null);
+        for (let info; (info = e.next_file(null));)
+            if (info.get_name().endsWith('.js'))
+                files.push(`${dir}/${info.get_name()}`);
+    }
+    const names = [];
+    for (const file of files) {
+        const source = new TextDecoder().decode(GLib.file_get_contents(`${ROOT}/${file}`)[1]);
+        const calls = source.split('GObject.registerClass(').slice(1);
+        for (const call of calls) {
+            const name = call.match(/^\{[^}]*?GTypeName: '([^']+)'/s)?.[1];
+            assert(name, `${file}: registerClass without GTypeName`);
+            assert(name.startsWith('FocusFlow'), `${file}: ${name} is not prefixed`);
+            names.push(name);
+        }
+    }
+    eq(names.length, 9, `found ${names.join()}`);
+    eq(new Set(names).size, names.length, 'duplicate GTypeName');
+});
+
 // ---- format ----
 
 test('formatClock: pads, rounds up, shows hours when needed', () => {

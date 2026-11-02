@@ -30,8 +30,9 @@ function isDismissed(e) {
 }
 
 /** Export (JSON backup, CSV history), import (replace or merge) and reset. */
-export const BackupPage = GObject.registerClass(
-class BackupPage extends Adw.PreferencesPage {
+export const BackupPage = GObject.registerClass({
+    GTypeName: 'FocusFlowBackupPage',
+}, class BackupPage extends Adw.PreferencesPage {
     _init({window, settings, topics, sessions}) {
         super._init({title: 'Backup', icon_name: 'document-save-symbolic'});
         this._window = window;

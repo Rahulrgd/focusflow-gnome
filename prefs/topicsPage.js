@@ -45,8 +45,9 @@ function iconButton(iconName, tooltip, onClicked) {
  * Section 2, "Manage Topics": add, edit, reorder (drag or arrows),
  * hide/show and delete topics.
  */
-export const TopicsPage = GObject.registerClass(
-class TopicsPage extends Adw.PreferencesPage {
+export const TopicsPage = GObject.registerClass({
+    GTypeName: 'FocusFlowTopicsPage',
+}, class TopicsPage extends Adw.PreferencesPage {
     _init({window, settings, topics, sessions}) {
         super._init({title: 'Topics', icon_name: 'view-list-symbolic'});
         this._window = window;

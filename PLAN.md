@@ -472,6 +472,8 @@ Manual check baaki: asli suspend/resume aur asli screen lock (headless me sirf s
 - [x] `version-name: "1.0.0"`
 - [ ] git tag `v1.0.0` (asli session check ke baad)
 
+**Asli session ka pehla try (2026-11-02):** `State: ERROR` — `Type name Gjs_lib_indicator_Indicator is already registered`. GObject class ko explicit `GTypeName` na do toh GJS naam file path + class name se banata hai; aapka `background-music-player` bhi `lib/indicator.js` me `Indicator` banata hai aur pehle load hota hai, isliye FocusFlow ka register fail hua. Headless tests me sirf FocusFlow load hota tha, isliye nahi pakda gaya. **Fix:** saari 9 classes ko `FocusFlow…` GTypeName (`FocusFlowIndicator`, `FocusFlowTimerEngine`, …) + unit test jo har `registerClass` me unique `FocusFlow` naam check karta hai. Headless me dono extensions ek saath load karke verify: dono ACTIVE, dono icons panel me.
+
 #### Test cases
 
 Headless = `scripts/headless.sh` / test harness me verified (phase likha hai). Real = asli Zorin session me haath se.
@@ -626,3 +628,4 @@ Script andar se ye recipe follow karti hai (alag XDG dirs, asli desktop ko chhue
 | 2026-11-02 | 8     | Backup page (JSON/CSV export, import Merge/Replace, Reset), lib/backup.js, clear-timers, transform(); 66 unit + 14 harness checks |
 | 2026-11-02 | 9     | Resume-from-suspend hook, topic-specific accessible names; lock/suspend/broken-file/perf/keyboard/dark-theme checks headless |
 | 2026-11-02 | 10    | README, LICENSE, v1.0.0, zip (28 files); fresh install + headless smoke test of the installed copy; test table filled; real-session checks + tag pending |
+| 2026-11-02 | 10    | Asli session: install.sh nahi chala tha → install + enable kiya; phir GType naam clash (music player) → har class ko FocusFlow GTypeName, 67 unit tests, dono extensions saath me headless verified |
