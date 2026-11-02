@@ -4,6 +4,7 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
+import {formatDuration} from '../lib/format.js';
 import * as Model from '../lib/topicsModel.js';
 
 function hexToRgba(hex) {
@@ -97,7 +98,11 @@ class TopicsPage extends Adw.PreferencesPage {
         const name = GLib.markup_escape_text(topic.name, -1);
         const row = new Adw.ActionRow({
             title: topic.hidden ? `<span alpha="55%">${name}</span>` : name,
-            subtitle: topic.hidden ? `${topic.minutes} min · Hidden` : `${topic.minutes} min`,
+            subtitle: [
+                `${topic.minutes} min`,
+                topic.dailyGoalMinutes ? `goal ${formatDuration(topic.dailyGoalMinutes * 60)} a day` : null,
+                topic.hidden ? 'Hidden' : null,
+            ].filter(Boolean).join(' · '),
         });
         row.topicId = topic.id;
 
@@ -173,11 +178,16 @@ class TopicsPage extends Adw.PreferencesPage {
         });
         const colorRow = new Adw.ActionRow({title: 'Color', activatable_widget: color});
         colorRow.add_suffix(color);
+        const goal = Adw.SpinRow.new_with_range(0, Model.MAX_GOAL_MINUTES, 5);
+        goal.title = 'Daily goal (minutes)';
+        goal.subtitle = '0 means no goal';
+        goal.value = topic?.dailyGoalMinutes ?? 0;
 
         const group = new Adw.PreferencesGroup();
         group.add(name);
         group.add(minutes);
         group.add(colorRow);
+        group.add(goal);
 
         const error = new Gtk.Label({
             css_classes: ['error'],
@@ -206,7 +216,7 @@ class TopicsPage extends Adw.PreferencesPage {
             name: name.text.trim(),
             minutes: Math.round(minutes.value),
             color: rgbaToHex(color.rgba),
-            dailyGoalMinutes: topic?.dailyGoalMinutes ?? null,
+            dailyGoalMinutes: Math.round(goal.value) || null,
         });
         const validate = () => {
             const errors = Model.validateTopic(draft(), this._topics.all);
@@ -224,12 +234,13 @@ class TopicsPage extends Adw.PreferencesPage {
         const submit = () => {
             if (!validate())
                 return;
-            const {name: newName, minutes: newMinutes, color: newColor} = draft();
+            const {name: newName, minutes: newMinutes, color: newColor, dailyGoalMinutes} = draft();
+            const fields = {name: newName, minutes: newMinutes, color: newColor, dailyGoalMinutes};
             try {
                 if (topic)
-                    this._topics.update(topic.id, {name: newName, minutes: newMinutes, color: newColor});
+                    this._topics.update(topic.id, fields);
                 else
-                    this._topics.add({name: newName, minutes: newMinutes, color: newColor});
+                    this._topics.add(fields);
             } catch (e) {
                 if (!(e instanceof Model.TopicError))
                     throw e;
@@ -244,6 +255,7 @@ class TopicsPage extends Adw.PreferencesPage {
         name.connect('changed', validate);
         name.connect('entry-activated', submit);
         minutes.connect('notify::value', validate);
+        goal.connect('notify::value', validate);
         color.connect('notify::rgba', validate);
         save.connect('clicked', submit);
         validate();
@@ -296,6 +308,7 @@ class TopicsPage extends Adw.PreferencesPage {
     }
 
     _toast(title) {
-        this._window.add_toast(new Adw.Toast({title, timeout: 3}));
+        // Toast titles are markup; topic names may contain < or &.
+        this._window.add_toast(new Adw.Toast({title: GLib.markup_escape_text(title, -1), timeout: 3}));
     }
 });

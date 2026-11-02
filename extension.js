@@ -1,3 +1,6 @@
+import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
+
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -50,10 +53,32 @@ export default class FocusFlowExtension extends Extension {
             soundPath: `${this.path}/sounds/done.oga`,
         });
 
+        this._engine.connectObject('finished', (_engine, session, late) => this._autoStart(session, late), this);
+
+        Main.wm.addKeybinding('toggle-timer', this._settings, Meta.KeyBindingFlags.NONE,
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._engine.toggle());
+
         this._settings.connectObject('changed::purge-topic-ids', () => this._purgeTopics(), this);
         this._purgeTopics();
 
         this._engine.checkFinished();
+    }
+
+    /**
+     * Auto-start: after one of the chosen topics finishes, start the chosen
+     * next topic from its full length. Not for finishes noticed late (after
+     * suspend or a shell restart): that break would already be over.
+     */
+    _autoStart(session, late) {
+        if (late || !this._settings.get_boolean('auto-chain-enabled'))
+            return;
+        if (!this._settings.get_strv('auto-chain-from').includes(session.topicId))
+            return;
+        const next = this._settings.get_string('auto-chain-to');
+        if (!next || next === session.topicId || !this._topics.find(next))
+            return;
+        this._engine.reset(next);
+        this._engine.start(next);
     }
 
     /**
@@ -77,7 +102,9 @@ export default class FocusFlowExtension extends Extension {
         // lock-screen support. Timer state is saved in GSettings and based on
         // the wall clock, so timers carry on across that and any real
         // disable/enable.
+        Main.wm.removeKeybinding('toggle-timer');
         this._settings.disconnectObject(this);
+        this._engine.disconnectObject(this);
         this._notifier.destroy();
         this._notifier = null;
         this._indicator.destroy();

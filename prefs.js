@@ -2,6 +2,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 
 import {SessionStore} from './lib/sessionStore.js';
 import {TopicsStore} from './lib/topicsStore.js';
+import {SettingsPage} from './prefs/settingsPage.js';
 import {TopicsPage} from './prefs/topicsPage.js';
 
 export default class FocusFlowPreferences extends ExtensionPreferences {
@@ -19,9 +20,12 @@ export default class FocusFlowPreferences extends ExtensionPreferences {
 
         const topicsPage = new TopicsPage({window, settings, topics, sessions});
         window.add(topicsPage);
+        const settingsPage = new SettingsPage({window, settings, topics});
+        window.add(settingsPage);
 
         window.connect('close-request', () => {
             topicsPage.disconnectAll();
+            settingsPage.disconnectAll();
             sessions.destroy();
             return false;
         });

@@ -57,6 +57,17 @@
   border-radius: 6px;
 }
 
+.focusflow-goal {
+  font-size: 0.8em;
+  color: rgba(127, 127, 127, 1);
+  font-feature-settings: "tnum";
+}
+
+.focusflow-goal-done {
+  color: #26a269;
+  font-weight: bold;
+}
+
 .focusflow-unit {
   font-size: 0.9em;
   color: rgba(127, 127, 127, 1);

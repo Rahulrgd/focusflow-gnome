@@ -16,7 +16,7 @@
 | 4  | Preferences: Manage Topics (Section 2)        | ✅ Done        | 12 prefs harness checks + menu→window and cross-process delete verified in headless shell; real drag pending |
 | 5  | Stats & graph (Section 3)                     | ✅ Done        | 57 unit tests (3 timezones); seeded history driven in headless shell + screenshots |
 | 6  | Notifications, sound & panel label            | ✅ Done        | 58 unit tests; real finish, late finish, DND, off switches, icon-only panel verified headless; audible check pending |
-| 7  | Settings, auto-chain, shortcut, daily goal    | ⬜ Not started |       |
+| 7  | Settings, auto-chain, shortcut, daily goal    | ✅ Done        | 30 prefs checks + real 1-min auto-start, Start Break, goal ✓, shortcut (virtual keyboard) verified headless |
 | 8  | Export / Import                               | ⬜ Not started |       |
 | 9  | Lock screen, suspend, robustness & polish     | ⬜ Not started |       |
 | 10 | Packaging, testing & release                  | ⬜ Not started |       |
@@ -384,15 +384,26 @@ asli 1-min timer khud khatam → `done.oga` baja, banner "Quick finished / 1m of
 ### Phase 7 — Settings, auto-chain, shortcut, daily goal
 **Goal:** Extra features.
 
-- [ ] `prefs/settingsPage.js`: sound, notifications, panel countdown, week start (`Adw.ComboRow`)
-- [ ] **Auto-chain:** switch + "After" topics (multi-select checkboxes) + "Start" topic (`Adw.ComboRow`); engine ke `finished` signal par hook
-- [ ] **Keyboard shortcut:** `Main.wm.addKeybinding('toggle-timer', settings, Meta.KeyBindingFlags.NONE, Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, …)`
-  - [ ] Running → pause · paused → resume · idle → `last-topic-id` start
-  - [ ] `disable()` me `Main.wm.removeKeybinding('toggle-timer')`
-  - [ ] Prefs me shortcut badalne ke liye `Adw.EntryRow` (accelerator text, `Gtk.accelerator_parse` se validate); asli "press keys" capture baad me
-- [ ] **Daily goal:** topic edit dialog me optional goal (minutes); Section 1 row me "40 / 120 min" + chhoti progress
+- [x] `prefs/settingsPage.js` (naya "Settings" page): sound, notifications, panel countdown, week start (`Adw.ComboRow`)
+- [x] **Auto-start (auto-chain):** switch + "After these topics" (checkbox har topic) + "Then start" (`Adw.ComboRow`, "None" + topics); `extension.js` engine ke `finished` par next topic poori length se start karta hai
+  - [x] Late finish (suspend / shell restart ke baad pakda gaya) par auto-start **nahi**: wo break waise bhi nikal chuka hota
+  - [x] Notification: auto-start hua toh body me "· Break started"; nahi hua toh **Start Break** button
+- [x] **Keyboard shortcut:** `Main.wm.addKeybinding('toggle-timer', …, NORMAL | OVERVIEW)` → `engine.toggle()`
+  - [x] Running → pause · paused → resume · idle → `last-topic-id` start
+  - [x] `disable()` me `Main.wm.removeKeybinding('toggle-timer')`
+  - [x] Prefs me `Adw.EntryRow` (`<Super><Alt>p` jaisa text, `Gtk.accelerator_parse` se validate, galat par toast, khali = off) + reset button + "Current shortcut" label (`Alt+Super+P`); asli "keys dabao" capture baad me
+- [x] **Daily goal:** topic dialog me `Adw.SpinRow` (0 = koi goal nahi); prefs row subtitle "goal 2h a day"; menu row me naam ke neeche "40m / 2h today", pura hone par hara "✓" (chal raha timer bhi gina)
 
 **Done when:** Har setting restart ke baad bhi rahe aur behaviour sach me badle. Shortcut menu band hone par bhi kaam kare.
+
+**Result (2026-11-02):** Unit tests 58 passed. Prefs harness (Settings + goal) 30/30, Phase 4 harness regression pass. Headless shell (asli time):
+Study (1 min, goal 2m) → khud khatam → Break apne aap start (298 s bache), notification "1m of Study today · Break started" · auto-start off → Study khatam, Break nahi chala, notification me "Start Again + Start Break", Start Break dabane par Break chala · goal "0s / 2m" → "3s" → "1m / 2m" → "2m / 2m today ✓" (hara) · virtual keyboard se Super+Alt+P: pause, resume, idle par last topic start · shortcut Ctrl+Shift+F8 kiya → purana ignore, naya kaam kare · disable par binding NONE, re-enable par wapas. Shell log me koi JS error nahi.
+
+**Notes:**
+- **Bugs mile aur fix hue:** (1) `Adw.SwitchRow({subtitle: undefined})` GJS me throw karta hai, poora Settings page load nahi hota → default `''`. (2) `settings.bind(…, 'sensitive')` ke saath `NO_SENSITIVITY` flag zaroori, warna bind key ki writability se sensitivity override kar deta hai. (3) `Adw.ComboRow` model badalne par apni `sensitive` khud reset karta hai → auto-start rows ek alag group me, group ki sensitivity bind. (4) Adw group description, row titles aur toasts Pango markup hain: `<Super>` wala help text dikhta hi nahi tha, aur "R&D" jaise topic naam toot jaate → sab user text escape.
+- `Main.wm.removeKeybinding()` entry delete nahi karta, mode `NONE` (0) set karta hai.
+- dconf se shortcut badalne ke baad naya binding ~1 s me lagta hai (0.5 s wale test me purana abhi active tha).
+- **Incident (2 Nov):** mere haath se chalaye headless runs har baar ek `ibus-daemon` chhod dete the jo GBs tak badhta raha; RAM + swap full hokar OOM killer ne VS Code band kiya. Do leaked daemons (1.8 GB + 470 MB, `XDG_RUNTIME_DIR=…/ff-test`) maine band kiye. Ab har headless test `scripts/headless.sh` se (section 4).
 
 ---
 
@@ -493,7 +504,19 @@ tail -n 5 ~/.local/share/focusflow/sessions.jsonl
 ```
 
 ### Headless test (bina GUI ke)
-Asli desktop ko chhue bina, alag XDG dirs ke saath:
+**Hamesha `scripts/headless.sh` use karo, haath se `gnome-shell --headless` mat chalao.**
+```bash
+./scripts/headless.sh                              # gnome-extensions info (State: ACTIVE?)
+./scripts/headless.sh --unsafe -- gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/gnome/Shell --method org.gnome.Shell.Eval '<js>'
+./scripts/headless.sh -- gjs -m my-harness.js      # koi bhi command, test session ke andar
+```
+Kyun: har haath wale run me gnome-shell ek `ibus-daemon` spawn karta tha jo shell band hone ke baad bhi chalta aur badhta rehta tha. 12 runs ke baad RAM + 24 GB swap full ho gaye aur OOM killer ne VS Code band kar diya (2 Nov 2026). Script ye karti hai:
+- poora run apne systemd scope me, `MemoryMax`/`MemorySwapMax` (default 2G, `--mem`) ke saath, toh runaway test sirf khud marta hai
+- PATH par no-op `ibus-daemon` stub, toh ibus start hi nahi hota
+- exit par scope stop (bacha hua sab kill), document-portal ka FUSE mount unmount, temp dirs delete
+
+Script andar se ye recipe follow karti hai (alag XDG dirs, asli desktop ko chhue bina):
 - `XDG_DATA_HOME`/`XDG_CONFIG_HOME` ko temp folders par, phir `dbus-run-session` ke andar `dconf write /org/gnome/shell/enabled-extensions "['focusflow@rahulrgd.github.io']"`. Private bus par chalne wala `dconf-service` temp `XDG_CONFIG_HOME/dconf/user` me likhta hai, asli settings nahi chhuta. (`GSETTINGS_BACKEND=keyfile` mat use karo: do processes ek saath likhein toh ek ka change ud jata hai.)
 - `XDG_RUNTIME_DIR` chhota path rakho (jaise `/run/user/1000/ff-test`), kyunki Wayland socket path 108 bytes se lamba nahi ho sakta
 - `dbus-run-session -- gnome-shell --headless --wayland --virtual-monitor 1280x720`, phir `gnome-extensions info/enable/disable`
@@ -560,3 +583,4 @@ Asli desktop ko chhue bina, alag XDG dirs ke saath:
 | 2026-11-02 | 4     | Manage Topics page (add/edit/drag/▲▼/hide/delete), purge-topic-ids, 49 unit + 12 prefs checks, headless verified |
 | 2026-11-02 | 5     | stats.js + StatsView (tabs, ‹ ›, bars, live), color palette, BinLayout y_expand fix, 57 unit tests (3 TZ), headless verified |
 | 2026-11-02 | 6     | Notifier (banner, Start Again, late finish), apna chime, icon-only panel mode, flush() fix, 58 unit tests, headless verified |
+| 2026-11-02 | 7     | Settings page, auto-start, Start Break, shortcut, daily goal; 4 prefs bugs fixed; leaked ibus-daemons band kiye, ab `scripts/headless.sh` |
