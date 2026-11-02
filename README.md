@@ -97,7 +97,8 @@ The preferences window (**Manage Topics…**, or
   session (`topicId`, `topicName`, `start`, `end`, `seconds`, `completed`).
   Every stretch of running time is logged, also when you pause or reset, so
   the stats show the time you actually spent. A session that crosses midnight
-  counts for the day it started.
+  is split between the two days (45 minutes from 11:50 PM: 10 minutes on the
+  first day, 35 on the next), also in the CSV export.
 - Nothing leaves your computer.
 
 ## Lock screen

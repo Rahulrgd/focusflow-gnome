@@ -796,27 +796,75 @@ test('stats isCurrentPeriod', () => {
     assert(Stats.isCurrentPeriod('all', 0, now));
 });
 
-test('stats aggregate: range by start time, totals, deleted topics, sort', () => {
+const span = (topicId, topicName, start, seconds, completed = false) =>
+    ({id: `${topicId}${start}`, topicId, topicName, start, end: start + seconds * 1000, seconds, completed});
+
+test('stats aggregate: time inside the range, split at its edges; totals, deleted topics, sort', () => {
     const topics = [{id: 'a', name: 'Study', color: '#111111'}, {id: 'b', name: 'Break', color: '#222222'}];
     const day = Stats.periodRange('daily', local(2026, 11, 2, 12));
-    const s = (topicId, topicName, start, seconds, completed = false) =>
-        ({id: `${topicId}${start}`, topicId, topicName, start, end: start + seconds * 1000, seconds, completed});
+    const next = Stats.periodRange('daily', local(2026, 11, 3, 12));
     const sessions = [
-        s('a', 'Study', local(2026, 11, 2, 0, 0), 600, true), // starts exactly at midnight: in
-        s('a', 'Study', local(2026, 11, 2, 23, 50), 1800, true), // crosses midnight: counts for start day
-        s('b', 'Break', local(2026, 11, 2, 10), 300),
-        s('a', 'Study', local(2026, 11, 3, 0, 0), 999), // next day: out
-        s('a', 'Study', local(2026, 11, 1, 23, 0), 999), // previous day: out
-        s('x', 'Old name', local(2026, 11, 2, 8), 120, true),
-        s('x', 'Gaming', local(2026, 11, 2, 9), 120), // later session's name wins
-        s('z', 'Zero', local(2026, 11, 2, 9), 0),
+        span('a', 'Study', local(2026, 11, 2, 0, 0), 600, true), // starts exactly at midnight: in
+        span('a', 'Study', local(2026, 11, 2, 23, 50), 1800, true), // crosses midnight: 10 min here, 20 next day
+        span('b', 'Break', local(2026, 11, 2, 10), 300),
+        span('a', 'Study', local(2026, 11, 3, 0, 0), 999), // next day: out
+        span('a', 'Study', local(2026, 11, 1, 23, 0), 999), // previous day, ends before midnight: out
+        span('x', 'Old name', local(2026, 11, 2, 8), 120, true),
+        span('x', 'Gaming', local(2026, 11, 2, 9), 120), // later session's name wins
+        span('z', 'Zero', local(2026, 11, 2, 9), 0),
     ];
     const out = Stats.aggregate(sessions, day, topics);
     eq(out.rows.map(r => [r.name, r.seconds, r.color, r.deleted]),
-        [['Study', 2400, '#111111', false], ['Break', 300, '#222222', false], ['Gaming', 240, null, true]]);
-    eq([out.totalSeconds, out.completedCount], [2940, 3]);
+        [['Study', 1200, '#111111', false], ['Break', 300, '#222222', false], ['Gaming', 240, null, true]]);
+    eq([out.totalSeconds, out.completedCount], [1740, 2], 'the crossing one completes on the next day');
+    const tomorrow = Stats.aggregate(sessions, next, topics);
+    eq([tomorrow.rows.map(r => [r.name, r.seconds]), tomorrow.completedCount], [[['Study', 2199]], 1]);
     eq(Stats.aggregate([], day, topics), {rows: [], totalSeconds: 0, completedCount: 0});
-    eq(Stats.aggregate(sessions, Stats.periodRange('all', 0), topics).totalSeconds, 2940 + 1998);
+    eq(Stats.aggregate(sessions, Stats.periodRange('all', 0), topics).totalSeconds, 600 + 1800 + 300 + 999 + 999 + 240);
+});
+
+test('stats: 45 min started at 11:50 PM counts 10 min today, 35 min tomorrow', () => {
+    const topics = [{id: 'a', name: 'Study', color: '#111111'}];
+    const s = span('a', 'Study', local(2026, 11, 2, 23, 50), 45 * 60, true);
+    const day = d => Stats.aggregate([s], Stats.periodRange('daily', local(2026, 11, d, 12)), topics);
+    eq([day(2).totalSeconds, day(2).completedCount], [600, 0]);
+    eq([day(3).totalSeconds, day(3).completedCount], [2100, 1]);
+    eq(Stats.aggregate([s], Stats.periodRange('weekly', local(2026, 11, 3)), topics).totalSeconds, 2700, 'same week: all of it');
+    // Sunday 23:50 -> Monday: split between two weeks (Monday start), whole in a Sunday-start week.
+    const sunday = span('a', 'Study', local(2026, 11, 8, 23, 50), 45 * 60);
+    eq(Stats.aggregate([sunday], Stats.periodRange('weekly', local(2026, 11, 8), 'mon'), topics).totalSeconds, 600);
+    eq(Stats.aggregate([sunday], Stats.periodRange('weekly', local(2026, 11, 9), 'mon'), topics).totalSeconds, 2100);
+    eq(Stats.aggregate([sunday], Stats.periodRange('weekly', local(2026, 11, 9), 'sun'), topics).totalSeconds, 2700);
+    // 31 Oct 23:50 -> 1 Nov: split between months.
+    const month = span('a', 'Study', local(2026, 10, 31, 23, 50), 45 * 60);
+    eq(Stats.aggregate([month], Stats.periodRange('monthly', local(2026, 10, 15)), topics).totalSeconds, 600);
+    eq(Stats.aggregate([month], Stats.periodRange('monthly', local(2026, 11, 15)), topics).totalSeconds, 2100);
+});
+
+test('stats.secondsInRange: proportional to clock time; zero-length counts at its start', () => {
+    const s = span('a', 'A', 1000, 100);
+    eq(Stats.secondsInRange(s, {start: 0, end: 51_000}), 50);
+    eq(Stats.secondsInRange(s, {start: -Infinity, end: Infinity}), 100);
+    eq(Stats.secondsInRange(s, {start: 101_000, end: 200_000}), 0);
+    // Stored seconds win over clock time (e.g. rounding): scaled, not recomputed.
+    eq(Stats.secondsInRange({...s, seconds: 50}, {start: 0, end: 51_000}), 25);
+    const zero = span('a', 'A', 1000, 0);
+    eq([Stats.secondsInRange(zero, {start: 0, end: 2000}), Stats.secondsInRange(zero, {start: 1000, end: 2000}),
+        Stats.secondsInRange(zero, {start: 0, end: 1000})], [0, 0, 0]);
+});
+
+test('stats.splitByDay: one piece per local day, seconds add up (also on DST days)', () => {
+    const within = Stats.splitByDay(span('a', 'A', local(2026, 11, 2, 9), 3600));
+    eq(within.length, 1);
+    const cross = Stats.splitByDay(span('a', 'A', local(2026, 11, 2, 23, 50), 2700));
+    eq(cross.map(p => [p.start, p.end, Math.round(p.seconds)]),
+        [[local(2026, 11, 2, 23, 50), local(2026, 11, 3), 600], [local(2026, 11, 3), local(2026, 11, 3, 0, 35), 2100]]);
+    const long = Stats.splitByDay(span('a', 'A', local(2026, 10, 24, 22), 50 * 3600));
+    eq(long.map(p => new Date(p.start).getDate()), [24, 25, 26]);
+    eq(long[1].start, local(2026, 10, 25));
+    eq(long[2].start, local(2026, 10, 26), 'next local midnight, even if 25 Oct had 25 h');
+    eq(Math.round(long.reduce((sum, p) => sum + p.seconds, 0)), 50 * 3600);
+    eq(Stats.splitByDay(span('a', 'A', local(2026, 11, 2, 9), 0)).map(p => p.seconds), [0]);
 });
 
 // ---- backup ----
@@ -873,7 +921,7 @@ test('backup.mergeSessions: union by id, local wins, sorted', () => {
     eq([sessions.map(x => x.id), sessions[0].seconds, added], [['s1', 's2', 's3'], 99, 1]);
 });
 
-test('backup.sessionsToCsv: local time, quoting, sorted', () => {
+test('backup.sessionsToCsv: local time, quoting, sorted, one row per day', () => {
     const topics = [{id: 't1', name: 'Study'}];
     const rows = [
         session(2, {start: local(2026, 11, 2, 9, 5), end: local(2026, 11, 2, 9, 50), seconds: 2700}),
@@ -882,8 +930,13 @@ test('backup.sessionsToCsv: local time, quoting, sorted', () => {
     ];
     eq(Backup.sessionsToCsv(rows, topics),
         'date,start,end,topic,minutes,completed\n' +
-        '2026-11-01,23:30,00:10,"Chess, ""blitz""",40.0,no\n' +
+        '2026-11-01,23:30,24:00,"Chess, ""blitz""",30.0,no\n' +
+        '2026-11-02,00:00,00:10,"Chess, ""blitz""",10.0,no\n' +
         '2026-11-02,09:05,09:50,Study,45.0,yes\n');
+    eq(Backup.sessionsToCsv([session(3, {start: local(2026, 11, 2, 23, 50), end: local(2026, 11, 3, 0, 35), seconds: 2700})]),
+        'date,start,end,topic,minutes,completed\n' +
+        '2026-11-02,23:50,24:00,Study,10.0,no\n' +
+        '2026-11-03,00:00,00:35,Study,35.0,yes\n', 'only the last row of a completed session says yes');
     eq(Backup.sessionsToCsv([]), 'date,start,end,topic,minutes,completed\n');
 });
 

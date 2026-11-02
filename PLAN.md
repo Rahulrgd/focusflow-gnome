@@ -88,7 +88,7 @@ Timer chalte waqt panel me icon ke saath countdown dikhta hai (jaise `Study 23:4
 - Sirf wo segment jo 0 tak pahuncha, `completed: true` hota hai.
 - Isse adhure ya pause kiye timers ka time bhi graph me sahi aata hai.
 - Har session me `topicName` ka snapshot bhi save hoga, taaki delete ho chuke topic ka naam graph me dikh sake.
-- Midnight cross karne wala session us din me ginega jis din wo shuru hua tha (simple rakha hai).
+- Midnight cross karne wala session **dono dinon me baant ke** ginta hai (clock time ke hisaab se): 11:50 PM se 45 min → 10 min us din, 35 min agle din. Storage me ek hi line rehti hai; baantna sirf stats/goal/notification/CSV ke hisaab me hota hai. "Completed" us din me ginta hai jis din session khatam hua. *(Pehle "start wale din me pura" tha; 3 Nov 2026 ko badla.)*
 
 **D6. Lock screen → `session-modes: ["user", "unlock-dialog"]`**
 - Pomodoro chalate waqt screen lock karna aam baat hai. Lock par extension disable ho gaya toh timer ka notification/sound unlock ke baad hi aayega.
@@ -594,7 +594,7 @@ Script andar se ye recipe follow karti hai (alag XDG dirs, asli desktop ko chhue
 | Sawal | Default |
 |-------|---------|
 | Chalte timer ke minutes badle toh? | Agle start par lagega |
-| Midnight cross karne wala session? | Start wale din me ginega |
+| Midnight cross karne wala session? | Dono dinon me baant ke (ab implemented) |
 | Weekly view stacked-by-day chahiye? | Abhi nahi (backlog, prefs Stats page) |
 | Shortcut default? | `Super+Alt+P` |
 | Panel me countdown hamesha? | Haan, setting se band kar sakte hain |
@@ -629,3 +629,4 @@ Script andar se ye recipe follow karti hai (alag XDG dirs, asli desktop ko chhue
 | 2026-11-02 | 9     | Resume-from-suspend hook, topic-specific accessible names; lock/suspend/broken-file/perf/keyboard/dark-theme checks headless |
 | 2026-11-02 | 10    | README, LICENSE, v1.0.0, zip (28 files); fresh install + headless smoke test of the installed copy; test table filled; real-session checks + tag pending |
 | 2026-11-02 | 10    | Asli session: install.sh nahi chala tha → install + enable kiya; phir GType naam clash (music player) → har class ko FocusFlow GTypeName, 67 unit tests, dono extensions saath me headless verified |
+| 2026-11-03 | —     | Panel countdown topic ke color me. Midnight cross karne wale sessions ab dono dinon me baant ke (stats, goal, notification "today", CSV ek row per day); 70 unit tests (3 TZ), headless verified |
