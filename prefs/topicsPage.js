@@ -166,10 +166,9 @@ class TopicsPage extends Adw.PreferencesPage {
         const minutes = Adw.SpinRow.new_with_range(Model.MIN_MINUTES, Model.MAX_MINUTES, 1);
         minutes.title = 'Minutes';
         minutes.value = topic?.minutes ?? 25;
-        const defaultColor = Model.DEFAULT_TOPICS[this._topics.all.length % Model.DEFAULT_TOPICS.length].color;
         const color = new Gtk.ColorDialogButton({
             dialog: new Gtk.ColorDialog({with_alpha: false}),
-            rgba: hexToRgba(topic?.color ?? defaultColor),
+            rgba: hexToRgba(topic?.color ?? Model.nextColor(this._topics.all)),
             valign: Gtk.Align.CENTER,
         });
         const colorRow = new Adw.ActionRow({title: 'Color', activatable_widget: color});

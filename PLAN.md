@@ -14,7 +14,7 @@
 | 2  | Timer engine                                  | ✅ Done        | 45 unit tests pass; 1-min finish, pause, disable/enable verified in headless shell |
 | 3  | Panel indicator + Section 1 (Timers)          | ✅ Done        | Menu driven in headless shell (11 checks) + screenshots (docs/menu.png); real-session check pending |
 | 4  | Preferences: Manage Topics (Section 2)        | ✅ Done        | 12 prefs harness checks + menu→window and cross-process delete verified in headless shell; real drag pending |
-| 5  | Stats & graph (Section 3)                     | ⬜ Not started |       |
+| 5  | Stats & graph (Section 3)                     | ✅ Done        | 57 unit tests (3 timezones); seeded history driven in headless shell + screenshots |
 | 6  | Notifications, sound & panel label            | ⬜ Not started |       |
 | 7  | Settings, auto-chain, shortcut, daily goal    | ⬜ Not started |       |
 | 8  | Export / Import                               | ⬜ Not started |       |
@@ -140,7 +140,7 @@ focusflow/
 ├── sounds/
 │   └── done.oga
 ├── docs/
-│   ├── menu.png              # README ke liye screenshot (panel menu)
+│   ├── menu.png              # README ke liye screenshot (panel menu, teeno sections)
 │   └── prefs.png             # README ke liye screenshot (Manage Topics)
 ├── icons/
 │   └── focusflow-symbolic.svg
@@ -329,21 +329,30 @@ Study ▶ → row highlight, countdown `44:58`, panel `Study 44:58` · Break ▶
 ### Phase 5 — Stats & graph (Section 3)
 **Goal:** Menu me har topic ka total time, Daily / Weekly / Monthly.
 
-- [ ] `stats.js` (pure) + unit tests:
-  - [ ] `periodRange(type, anchor, weekStart)` → `{ start, end, label }`
-  - [ ] `shiftPeriod(type, anchor, ±1)`
-  - [ ] `aggregate(sessions, range)` → `[{ topicId, name, color, seconds }]` (zero wale nahi), `totalSeconds`, `completedCount`
-- [ ] `statsView.js`:
-  - [ ] Tabs: **Daily | Weekly | Monthly | All** (toggle `St.Button`s), last tab `stats-period` me yaad rahe
-  - [ ] **‹  label  ›** navigation; current period ke aage `›` disabled
-  - [ ] Summary: "Total 5h 20m · 6 completed"
-  - [ ] Har topic ki horizontal bar: name · color bar · "2h 15m", sabse zyada time upar
-  - [ ] Delete ho chuke topic (history rakhi) → `topicName` + grey color + "(deleted)"
-  - [ ] Empty state: "No time logged for this period"
-- [ ] Stats sirf tab recompute hon jab menu khule, period badle, ya naya session aaye (har tick par nahi)
-- [ ] Chal raha segment bhi (abhi tak ka time) live total me jode (optional, achha lagega)
+- [x] `stats.js` (pure) + unit tests:
+  - [x] `periodRange(type, anchor, weekStart, now)` → `{ start, end, label }` ("Today", "Yesterday", "Sat, 31 Oct", "This week", "Last week", "19 Oct – 25 Oct", "This month", "October 2026", "All time")
+  - [x] `shiftPeriod(type, anchor, ±1)` (31 Jan + 1 month = February) + `isCurrentPeriod()`
+  - [x] `aggregate(sessions, range, topics)` → `rows` (zero wale nahi, sabse zyada upar), `totalSeconds`, `completedCount`
+- [x] `statsView.js`:
+  - [x] Tabs: **Daily | Weekly | Monthly | All** (toggle `St.Button`s), last tab `stats-period` me yaad rahe
+  - [x] **‹  label  ›** navigation; current period par `›` disabled; "All" me arrows hidden
+  - [x] Summary: "Total 2h · 3 completed"
+  - [x] Har topic ki horizontal bar: name · color bar (sabse bade total ke hisaab se) · "1h 30m"
+  - [x] Delete ho chuke topic (history rakhi) → aakhri logged naam, grey italic, grey bar *(plan me "(deleted)" suffix tha; 340 px menu me naam kat jata tha)*
+  - [x] Empty state: "No time logged for this period"
+- [x] Menu khulne par current period par wapas; menu khula ho tabhi refresh (tick, naya session, `week-start` change). Bar rows reuse hote hain, isliye har second refresh sasta hai.
+- [x] Chal raha segment (abhi tak ka time) live total me
+- [-] *(Optional)* Weekly stacked-by-day view → backlog (prefs Stats page)
+- [x] Naye topics ko 10-color palette se pehla unused color (`nextColor`), taaki 5th topic Study jaisa blue na ho
 
 **Done when:** Aaj, is hafte aur is mahine ke totals `sessions.jsonl` ke raw data se match karein. Pichhle periods par jaana kaam kare. Week start setting ka asar dikhe.
+
+**Result (2026-11-02):** Unit tests 57 passed, teen timezones me (IST, Europe/Berlin, America/New_York; DST wale din bhi). Headless shell me seeded history (aaj Study 1h 30m + Break 10m + deleted "Chess" 20m, kal Gaming 2h, pichhle mahine YouTube 30m) ke saath: Today `Total 2h · 3 completed` · ‹ Yesterday `Gaming 2h` · › aaj par ruk jata hai · This week (Mon start) 2h, Sunday start par kal ka Gaming bhi → 4h · This month 4h, ‹ October 2026 30m · All time 4h 30m, arrows hidden · tab menu dobara kholne par yaad · chal raha Reading 3s → 5s live, pause par log. Shell log me koi JS error nahi. Screenshot: `docs/menu.png` (teeno sections).
+
+**Notes:**
+- **Bug mila (Phase 3 se bhi):** `BinLayout` me khali fill widget ko `y_expand` ke bina 0 px height milti hai, isliye bars aur timer row ki progress bar dikhti hi nahi thi. Dono me `y_expand: true`.
+- Saari date math local calendar se (`new Date(y, m, d + 1)`), "+24 h" se nahi, taaki DST wale din 23/25 ghante ke bhi sahi rahein.
+- Missing folder par GIO file monitor polling par chalta hai (~4 s delay), phir bhi reload hota hai.
 
 ---
 
@@ -539,3 +548,4 @@ Asli desktop ko chhue bina, alag XDG dirs ke saath:
 | 2026-11-02 | 2     | timerMath + TimerEngine, `active-timer` → `timers` map, destroy() data-loss fix, 45 unit tests. Headless me verified |
 | 2026-11-02 | 3     | Panel indicator, timer rows, format.js, stylesheet; menu headless me chala kar + screenshots se verified |
 | 2026-11-02 | 4     | Manage Topics page (add/edit/drag/▲▼/hide/delete), purge-topic-ids, 49 unit + 12 prefs checks, headless verified |
+| 2026-11-02 | 5     | stats.js + StatsView (tabs, ‹ ›, bars, live), color palette, BinLayout y_expand fix, 57 unit tests (3 TZ), headless verified |

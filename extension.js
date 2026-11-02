@@ -26,8 +26,10 @@ export default class FocusFlowExtension extends Extension {
         });
 
         this._indicator = new Indicator({
+            settings: this._settings,
             engine: this._engine,
             topics: this._topics,
+            sessions: this._sessions,
             name: this.metadata.name,
             iconPath: `${this.path}/icons/focusflow-symbolic.svg`,
             openPreferences: () => this.openPreferences(),

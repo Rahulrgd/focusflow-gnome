@@ -84,3 +84,80 @@
   padding: 8px;
   color: rgba(127, 127, 127, 1);
 }
+
+/* Section 3: stats */
+
+.focusflow-stats {
+  margin: 0 8px;
+  spacing: 6px;
+}
+
+.focusflow-tabs {
+  spacing: 2px;
+  padding: 2px;
+  border-radius: 99px;
+  background-color: rgba(127, 127, 127, 0.12);
+}
+
+.focusflow-tab {
+  padding: 4px 12px;
+  border-radius: 99px;
+  font-size: 0.9em;
+}
+
+.focusflow-tab:hover,
+.focusflow-tab:focus {
+  background-color: rgba(127, 127, 127, 0.2);
+}
+
+.focusflow-tab:checked {
+  background-color: rgba(127, 127, 127, 0.35);
+  font-weight: bold;
+}
+
+.focusflow-stats-label {
+  font-weight: bold;
+}
+
+.focusflow-stats-summary {
+  font-size: 0.9em;
+  color: rgba(127, 127, 127, 1);
+}
+
+.focusflow-bars {
+  spacing: 6px;
+  padding: 2px 4px 6px;
+}
+
+.focusflow-bar-row {
+  spacing: 8px;
+}
+
+.focusflow-bar-name {
+  width: 6.5em;
+}
+
+.focusflow-bar-track {
+  height: 10px;
+  border-radius: 5px;
+}
+
+.focusflow-bar-fill {
+  border-radius: 5px;
+  background-color: rgba(127, 127, 127, 0.5);
+}
+
+.focusflow-bar-time {
+  min-width: 4.5em;
+  text-align: right;
+  font-feature-settings: "tnum";
+}
+
+.focusflow-bar-deleted .focusflow-bar-name,
+.focusflow-bar-deleted .focusflow-bar-time {
+  color: rgba(127, 127, 127, 1);
+}
+
+.focusflow-bar-deleted .focusflow-bar-name {
+  font-style: italic;
+}

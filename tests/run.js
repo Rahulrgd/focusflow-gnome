@@ -10,6 +10,7 @@ import * as Model from '../lib/topicsModel.js';
 import {migrateData, migrateSettings, SCHEMA_VERSION} from '../lib/migrate.js';
 import {isValidSession, parseSessionLines, SessionStore} from '../lib/sessionStore.js';
 import {TimerEngine} from '../lib/timerEngine.js';
+import * as Stats from '../lib/stats.js';
 import * as TimerMath from '../lib/timerMath.js';
 import {TopicsStore} from '../lib/topicsStore.js';
 
@@ -131,6 +132,17 @@ test('addTopic: rejects bad minutes, color and daily goal', () => {
     throws(() => Model.addTopic(list, {name: 'A', minutes: 5, dailyGoalMinutes: 1441}, 'x'), /Daily goal/);
     eq(Model.addTopic(list, {name: 'A', minutes: 5, dailyGoalMinutes: ''}, 'x').at(-1).dailyGoalMinutes, null);
     eq(Model.addTopic(list, {name: 'A', minutes: 5, dailyGoalMinutes: '90'}, 'x').at(-1).dailyGoalMinutes, 90);
+});
+
+test('nextColor: unused palette colors first, then cycles', () => {
+    let list = seeded();
+    eq(Model.nextColor(list), '#ff7800');
+    list = Model.addTopic(list, {name: 'Reading', minutes: 20}, 'r');
+    eq(Model.findTopic(list, 'r').color, '#ff7800');
+    list = Model.updateTopic(list, list[0].id, {color: '#123456'});
+    eq(Model.nextColor(list), '#3584e4', 'a freed color is reused first');
+    const full = Model.PALETTE.map((color, i) => ({id: `p${i}`, color}));
+    eq(Model.nextColor(full), Model.PALETTE[0]);
 });
 
 test('addTopic: first topic of an empty list gets order 0', () => {
@@ -703,6 +715,96 @@ test('engine.destroy: removes the tick and the topics handler', () => {
     h.topics.delete(h.id('Study'));
     eq(Object.keys(h.engine.timers).length, 1, 'no longer reacts to topic changes');
     h.sessions.destroy();
+});
+
+// ---- stats ----
+
+const local = (y, m, d, h = 0, min = 0) => new Date(y, m - 1, d, h, min).getTime();
+
+test('stats daily: local midnight to midnight, labels', () => {
+    const now = local(2026, 11, 2, 14);
+    const r = Stats.periodRange('daily', now, 'mon', now);
+    eq([r.start, r.end, r.label], [local(2026, 11, 2), local(2026, 11, 3), 'Today']);
+    eq(Stats.periodRange('daily', local(2026, 11, 1, 23, 59), 'mon', now).label, 'Yesterday');
+    eq(Stats.periodRange('daily', local(2026, 10, 31, 9), 'mon', now).label, 'Sat, 31 Oct');
+    eq(Stats.periodRange('daily', local(2025, 12, 31, 9), 'mon', now).label, 'Wed, 31 Dec 2025');
+});
+
+test('stats weekly: Monday or Sunday start, labels', () => {
+    const now = local(2026, 11, 2, 14); // a Monday
+    const sunday = local(2026, 11, 8, 20);
+    const mon = Stats.periodRange('weekly', sunday, 'mon', now);
+    eq([mon.start, mon.end, mon.label], [local(2026, 11, 2), local(2026, 11, 9), 'This week']);
+    const sun = Stats.periodRange('weekly', sunday, 'sun', now);
+    eq([sun.start, sun.end], [local(2026, 11, 8), local(2026, 11, 15)]);
+    eq(Stats.periodRange('weekly', local(2026, 10, 28), 'mon', now).label, 'Last week');
+    eq(Stats.periodRange('weekly', local(2026, 10, 21), 'mon', now).label, '19 Oct – 25 Oct');
+    eq(Stats.periodRange('weekly', local(2025, 12, 30), 'mon', now).label, '29 Dec – 4 Jan');
+    eq(Stats.periodRange('weekly', local(2024, 12, 30), 'mon', now).label, '30 Dec – 5 Jan 2025');
+});
+
+test('stats monthly + all', () => {
+    const now = local(2026, 11, 2, 14);
+    const m = Stats.periodRange('monthly', now, 'mon', now);
+    eq([m.start, m.end, m.label], [local(2026, 11, 1), local(2026, 12, 1), 'This month']);
+    eq(Stats.periodRange('monthly', local(2026, 2, 14), 'mon', now).label, 'February 2026');
+    const all = Stats.periodRange('all', now);
+    eq([all.start, all.end, all.label], [-Infinity, Infinity, 'All time']);
+    throws(() => Stats.periodRange('yearly', now), /Unknown period/);
+});
+
+test('stats shiftPeriod: days, weeks, months (31 Jan + 1 month = February)', () => {
+    eq(Stats.shiftPeriod('daily', local(2026, 11, 2, 14), -1), local(2026, 11, 1));
+    eq(Stats.shiftPeriod('daily', local(2026, 12, 31, 14), 1), local(2027, 1, 1));
+    eq(Stats.shiftPeriod('weekly', local(2026, 11, 2, 14), -2), local(2026, 10, 19));
+    eq(Stats.shiftPeriod('monthly', local(2026, 1, 31), 1), local(2026, 2, 1));
+    eq(Stats.shiftPeriod('monthly', local(2026, 1, 15), -1), local(2025, 12, 1));
+    eq(Stats.shiftPeriod('all', 123, 5), 123);
+});
+
+test('stats: day and week boundaries survive DST changes (any TZ)', () => {
+    // Europe ends DST on 25 Oct 2026, the US on 1 Nov 2026.
+    for (const [y, m, d] of [[2026, 10, 25], [2026, 11, 1], [2026, 3, 29], [2026, 3, 8]]) {
+        const r = Stats.periodRange('daily', local(y, m, d, 12));
+        eq([r.start, r.end], [local(y, m, d), local(y, m, d + 1)], `${y}-${m}-${d}`);
+        eq(Stats.shiftPeriod('daily', local(y, m, d, 23), 1), local(y, m, d + 1));
+        eq(Stats.shiftPeriod('daily', local(y, m, d + 1, 0, 30), -1), local(y, m, d));
+    }
+    const w = Stats.periodRange('weekly', local(2026, 10, 25, 12));
+    eq([w.start, w.end], [local(2026, 10, 19), local(2026, 10, 26)]);
+    eq(Stats.shiftPeriod('weekly', local(2026, 10, 26), -1), local(2026, 10, 19));
+});
+
+test('stats isCurrentPeriod', () => {
+    const now = local(2026, 11, 2, 14);
+    assert(Stats.isCurrentPeriod('daily', local(2026, 11, 2, 1), now));
+    assert(!Stats.isCurrentPeriod('daily', local(2026, 11, 1, 23), now));
+    assert(Stats.isCurrentPeriod('weekly', local(2026, 11, 8, 23), now, 'mon'));
+    assert(!Stats.isCurrentPeriod('weekly', local(2026, 11, 8, 23), now, 'sun'));
+    assert(Stats.isCurrentPeriod('all', 0, now));
+});
+
+test('stats aggregate: range by start time, totals, deleted topics, sort', () => {
+    const topics = [{id: 'a', name: 'Study', color: '#111111'}, {id: 'b', name: 'Break', color: '#222222'}];
+    const day = Stats.periodRange('daily', local(2026, 11, 2, 12));
+    const s = (topicId, topicName, start, seconds, completed = false) =>
+        ({id: `${topicId}${start}`, topicId, topicName, start, end: start + seconds * 1000, seconds, completed});
+    const sessions = [
+        s('a', 'Study', local(2026, 11, 2, 0, 0), 600, true), // starts exactly at midnight: in
+        s('a', 'Study', local(2026, 11, 2, 23, 50), 1800, true), // crosses midnight: counts for start day
+        s('b', 'Break', local(2026, 11, 2, 10), 300),
+        s('a', 'Study', local(2026, 11, 3, 0, 0), 999), // next day: out
+        s('a', 'Study', local(2026, 11, 1, 23, 0), 999), // previous day: out
+        s('x', 'Old name', local(2026, 11, 2, 8), 120, true),
+        s('x', 'Gaming', local(2026, 11, 2, 9), 120), // later session's name wins
+        s('z', 'Zero', local(2026, 11, 2, 9), 0),
+    ];
+    const out = Stats.aggregate(sessions, day, topics);
+    eq(out.rows.map(r => [r.name, r.seconds, r.color, r.deleted]),
+        [['Study', 2400, '#111111', false], ['Break', 300, '#222222', false], ['Gaming', 240, null, true]]);
+    eq([out.totalSeconds, out.completedCount], [2940, 3]);
+    eq(Stats.aggregate([], day, topics), {rows: [], totalSeconds: 0, completedCount: 0});
+    eq(Stats.aggregate(sessions, Stats.periodRange('all', 0), topics).totalSeconds, 2940 + 1998);
 });
 
 // ---- format ----
