@@ -13,7 +13,7 @@
 | 1  | Data layer (topics, sessions, pure modules)   | ✅ Done        | 28 unit tests pass; seeding, add, append, external reload, re-enable verified in headless shell |
 | 2  | Timer engine                                  | ✅ Done        | 45 unit tests pass; 1-min finish, pause, disable/enable verified in headless shell |
 | 3  | Panel indicator + Section 1 (Timers)          | ✅ Done        | Menu driven in headless shell (11 checks) + screenshots (docs/menu.png); real-session check pending |
-| 4  | Preferences: Manage Topics (Section 2)        | ⬜ Not started |       |
+| 4  | Preferences: Manage Topics (Section 2)        | ✅ Done        | 12 prefs harness checks + menu→window and cross-process delete verified in headless shell; real drag pending |
 | 5  | Stats & graph (Section 3)                     | ⬜ Not started |       |
 | 6  | Notifications, sound & panel label            | ⬜ Not started |       |
 | 7  | Settings, auto-chain, shortcut, daily goal    | ⬜ Not started |       |
@@ -140,7 +140,8 @@ focusflow/
 ├── sounds/
 │   └── done.oga
 ├── docs/
-│   └── menu.png              # README ke liye screenshot
+│   ├── menu.png              # README ke liye screenshot (panel menu)
+│   └── prefs.png             # README ke liye screenshot (Manage Topics)
 ├── icons/
 │   └── focusflow-symbolic.svg
 ├── schemas/
@@ -161,6 +162,7 @@ focusflow/
 | `topics`                  | `s`  | `'[]'`               | Topics ka JSON array (neeche dekho) |
 | `seeded`                  | `b`  | `false`              | Default topics ek baar hi add hon |
 | `timers`                  | `s`  | `'{}'`               | Topic id → running/paused timer ka JSON map (max ek running) |
+| `purge-topic-ids`         | `as` | `[]`                 | "Delete History" ki request: prefs likhta hai, shell purge karke khali karta hai |
 | `last-topic-id`           | `s`  | `''`                 | Shortcut se kaunsa topic resume/start ho |
 | `sound-enabled`           | `b`  | `true`               | Finish par sound |
 | `notifications-enabled`   | `b`  | `true`               | Finish par notification |
@@ -301,17 +303,26 @@ Study ▶ → row highlight, countdown `44:58`, panel `Study 44:58` · Break ▶
 ### Phase 4 — Preferences: Manage Topics (Section 2)
 **Goal:** Topics ka poora add/edit/delete/hide/reorder prefs window me.
 
-- [ ] `prefs/topicsPage.js`: `Adw.PreferencesPage` → upar **"+ Add Topic"** button, neeche topics ki list
-- [ ] Har row (`Adw.ActionRow`): drag handle (`list-drag-handle-symbolic`) · ▲ ▼ · color swatch · Name · "45 min" · Edit · Hide/Show · Delete
-- [ ] Add/Edit dialog (`Adw.Dialog`): `Adw.EntryRow` (name), `Adw.SpinRow` (minutes, 1–600), `Gtk.ColorDialogButton` (color), daily goal (Phase 7 me)
-- [ ] Drag-and-drop reorder: `Gtk.DragSource` on handle + `Gtk.DropTarget` on rows → `reorder()`
-- [ ] Hide/Show toggle: hidden row dim + "Hidden" tag; hidden topics graph me dikhte rahenge
-- [ ] Delete: `Adw.AlertDialog` → **Keep history** / **Delete history** / Cancel
-  - [ ] Active topic delete ho raha hai → pehle timer reset (extension `topics` change par khud handle kare)
-  - [ ] Delete history → `sessionStore.rewrite()` bina us topic ke
-- [ ] Duplicate naam par error message (`Adw.Toast`)
+- [x] `prefs/topicsPage.js`: `Adw.PreferencesPage` → upar **"+ Add Topic"** button (group header me), neeche topics ki list
+- [x] Har row (`Adw.ActionRow`): drag handle · color swatch · Name · "45 min" · ▲ ▼ · Edit · Hide/Show · Delete
+- [x] Add/Edit dialog (`Adw.Dialog`): `Adw.EntryRow` (name, Enter = save), `Adw.SpinRow` (minutes, 1–600), `Gtk.ColorDialogButton` (color); daily goal Phase 7 me
+- [x] Drag-and-drop reorder: `Gtk.DragSource` + `Gtk.DropTarget` poori row par (handle sirf visual hint) → upar/neeche aadhe ke hisaab se `reorder()`
+- [x] Hide/Show toggle: hidden row ka naam + swatch dim, subtitle me "Hidden"; hidden topics graph me dikhte rahenge
+- [x] Delete: `Adw.AlertDialog` → history ho toh **Keep History** / **Delete History** / Cancel, warna sirf **Delete** / Cancel
+  - [x] Active topic delete → shell ka engine `topics` change par timer hatata hai (running segment log)
+  - [x] Delete History → `purge-topic-ids` me id, phir topic delete; shell timer ko bina log kiye hatata hai, `removeTopics()` se history purge karta hai, key khali karta hai
+- [x] Duplicate/galat naam par dialog me inline error + Save disabled; save/delete par `Adw.Toast`
+- [x] Shell menu se topics badle (minutes edit etc.) toh window ki list turant rebuild
 
 **Done when:** Add, edit, reorder (drag + buttons), hide/show aur delete sab kaam karein, aur khula hua panel menu turant update ho.
+
+**Result (2026-11-02):** Unit tests 49 passed (`removeTopics`, `engine.forget` naye). Prefs GJS harness (headless display) → 12/12: ▲▼ aur ends par disable, drop se upar/neeche/khud par, hide/show, add (empty → disabled, "study" duplicate → error, "Reading" add), edit (prefilled, Enter se save, id same), delete bina history (sirf Delete), delete 2 sessions ke saath (Keep/Delete History, purge id queue), bahar se change par rebuild, empty state, window band hone ke baad changes safe. Headless shell (isolated dconf) me: menu ka "Manage Topics…" → asli "FocusFlow" window khuli, menu band hua; running Study + history ke saath Delete History → history aur timer gaye, menu se row gayi; Keep History → history bachi; extension disabled hote hue queue hua purge → enable par chala. Shell log me koi JS error nahi. Screenshot: `docs/prefs.png`. Asli mouse se drag-and-drop aur color picker dialog manual check baaki.
+
+**Notes:**
+- **Design change:** Delete History ka purge prefs nahi, shell karta hai (`purge-topic-ids` key). Pehle plan prefs se `rewrite()` ka tha, par running timer ka last segment shell turant log karta, jo purge ke baad file me aa sakta tha; aur window jaldi band hone par delayed purge kho jata.
+- Test harness me top-level `await` ke baad `loop.run()` nested ho toh GJS ke promise jobs nahi chalte. Harness me sab kuchh `main()` ke andar, `loop.run()` top level par.
+- Keyfile GSettings backend (purane headless tests) me har writer poori file likhta hai, isliye do processes ek saath likhein toh ek ka change ud jata hai. Asli dconf per-key likhta hai. Ab headless tests isolated dconf (`XDG_CONFIG_HOME` temp) par chalte hain; asli `~/.config/dconf/user` me koi FocusFlow key nahi gayi (check kiya).
+- Error label dikhne par libadwaita 1.5 `AdwBreakpointBin ... natural size must be >= min size` warning deta hai; harmless.
 
 ---
 
@@ -464,11 +475,14 @@ tail -n 5 ~/.local/share/focusflow/sessions.jsonl
 
 ### Headless test (bina GUI ke)
 Asli desktop ko chhue bina, alag XDG dirs ke saath:
-- `XDG_DATA_HOME`/`XDG_CONFIG_HOME` ko temp folders par, `GSETTINGS_BACKEND=keyfile`, aur keyfile me `enabled-extensions` pehle se set
+- `XDG_DATA_HOME`/`XDG_CONFIG_HOME` ko temp folders par, phir `dbus-run-session` ke andar `dconf write /org/gnome/shell/enabled-extensions "['focusflow@rahulrgd.github.io']"`. Private bus par chalne wala `dconf-service` temp `XDG_CONFIG_HOME/dconf/user` me likhta hai, asli settings nahi chhuta. (`GSETTINGS_BACKEND=keyfile` mat use karo: do processes ek saath likhein toh ek ka change ud jata hai.)
 - `XDG_RUNTIME_DIR` chhota path rakho (jaise `/run/user/1000/ff-test`), kyunki Wayland socket path 108 bytes se lamba nahi ho sakta
 - `dbus-run-session -- gnome-shell --headless --wayland --virtual-monitor 1280x720`, phir `gnome-extensions info/enable/disable`
 - Shell ke andar JS chalana ho toh `--unsafe-mode` + `org.gnome.Shell.Eval`
 - Prefs: GJS harness `prefs.js` ko seedha import karta hai (`GI_TYPELIB_PATH=/usr/lib/gnome-shell/girepository-1.0`, Extensions gresource register karke), headless shell sirf display ke liye
+- Prefs window shell se kholni ho toh: shell start hone se pehle `dbus-update-activation-environment WAYLAND_DISPLAY=`, socket banne ke baad `WAYLAND_DISPLAY=wayland-0`
+- Harness me async kaam ho toh sab `main()` me rakho aur `loop.run()` top level par (top-level `await` ke baad nested loop me promises nahi chalte)
+- Cleanup me `rm -rf "${DIR:?}"` likho, bare `$DIR` nahi
 
 ### Release zip
 ```bash
@@ -486,7 +500,7 @@ Asli desktop ko chhue bina, alag XDG dirs ke saath:
 
 - **Popup menu me text entry:** menu ka keyboard grab kabhi-kabhi `St.Entry` focus me dikkat deta hai. Fallback: minutes ke liye −/+ buttons (5 min step) aur scroll se badalna.
 - **Lock screen par chalna:** extension review me `unlock-dialog` ka reason batana padta hai. Indicator hide karna zaroori hai.
-- **Prefs aur extension dono `sessions.jsonl` likhte hain:** extension sirf append karta hai, prefs sirf rewrite (delete/import). Dono ek hi pal me likhein toh ek append kho sakta hai. Bahut kam chance; FileMonitor reload ke baad extension apne pending sessions dobara check karega.
+- **Prefs aur extension dono `sessions.jsonl` likhte hain:** delete-history ka race Phase 4 me `purge-topic-ids` se khatam kiya (purge shell hi karta hai, apni write queue me). Import (Phase 8) abhi bhi prefs se rewrite karega; usi waqt shell append kare toh ek session kho sakta hai. Phase 8 me import bhi shell se karwana ya rewrite se pehle reload karna (`removeTopics` jaisa) decide karna hai.
 - **Zorin ka custom panel (Zorin Taskbar):** panel ki position/space alag ho sakti hai. Real session me ek baar dekhna.
 - **GNOME version:** sirf Shell 46 target. Zorin future me GNOME upgrade kare toh MessageTray / prefs API check karne padenge.
 
@@ -524,3 +538,4 @@ Asli desktop ko chhue bina, alag XDG dirs ke saath:
 | 2026-11-02 | 1     | topicsModel, topicsStore, sessionStore (JSONL), migrate, 28 unit tests. Headless me verified |
 | 2026-11-02 | 2     | timerMath + TimerEngine, `active-timer` → `timers` map, destroy() data-loss fix, 45 unit tests. Headless me verified |
 | 2026-11-02 | 3     | Panel indicator, timer rows, format.js, stylesheet; menu headless me chala kar + screenshots se verified |
+| 2026-11-02 | 4     | Manage Topics page (add/edit/drag/▲▼/hide/delete), purge-topic-ids, 49 unit + 12 prefs checks, headless verified |

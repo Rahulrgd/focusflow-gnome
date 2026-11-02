@@ -35,7 +35,25 @@ export default class FocusFlowExtension extends Extension {
         Main.panel.addToStatusArea(this.uuid, this._indicator, 0, 'right');
         this._indicator.syncSessionMode();
 
+        this._settings.connectObject('changed::purge-topic-ids', () => this._purgeTopics(), this);
+        this._purgeTopics();
+
         this._engine.checkFinished();
+    }
+
+    /**
+     * Handles "Delete with History" from the preferences window, which lists
+     * the topic here before deleting it, so its running timer is dropped
+     * instead of logged, then its sessions are removed.
+     */
+    _purgeTopics() {
+        const ids = this._settings.get_strv('purge-topic-ids');
+        if (ids.length === 0)
+            return;
+        ids.forEach(id => this._engine.forget(id));
+        this._settings.set_strv('purge-topic-ids', []);
+        this._sessions.removeTopics(ids)
+            .catch(e => console.error(`${this.uuid}: deleting history failed: ${e.message}`));
     }
 
     disable() {
@@ -44,6 +62,7 @@ export default class FocusFlowExtension extends Extension {
         // lock-screen support. Timer state is saved in GSettings and based on
         // the wall clock, so timers carry on across that and any real
         // disable/enable.
+        this._settings.disconnectObject(this);
         this._indicator.destroy();
         this._indicator = null;
         this._engine.destroy();

@@ -380,6 +380,25 @@ test('SessionStore.destroy: queued writes still land', async () => {
     reread.destroy();
 });
 
+test('SessionStore.removeTopics: drops only those topics, keeps outside writes', async () => {
+    const path = tmpPath('remove.jsonl');
+    const store = new SessionStore(path);
+    await store.append(session(1, {topicId: 'a'}));
+    await store.append(session(2, {topicId: 'b'}));
+    // Written by another process after our last load.
+    const other = new SessionStore(path);
+    await other.append(session(3, {topicId: 'a'}));
+    await other.append(session(4, {topicId: 'c'}));
+    await store.removeTopics(['a', 'ghost']);
+    eq(store.sessions.map(s => s.id), ['s2', 's4']);
+    const reread = new SessionStore(path);
+    await reread.load();
+    eq(reread.sessions.map(s => s.id), ['s2', 's4']);
+    await store.removeTopics(['nothing']);
+    eq(store.sessions.map(s => s.id), ['s2', 's4']);
+    [store, other, reread].forEach(s => s.destroy());
+});
+
 test('SessionStore.monitor: reloads on external change, ignores own writes', async () => {
     const path = tmpPath('monitor.jsonl');
     const store = new SessionStore(path);
@@ -611,6 +630,20 @@ test('engine: editing minutes only affects the next start', () => {
     h.engine.reset(s);
     h.engine.start(s);
     eq(h.engine.remainingMs(s), 10 * MIN);
+    h.done();
+});
+
+test('engine.forget: drops a running timer without logging it', async () => {
+    const h = makeEngine('forget');
+    const s = h.id('Study');
+    h.engine.start(s);
+    h.time.now += 5 * MIN;
+    h.engine.forget(s);
+    h.engine.forget('ghost');
+    eq(h.engine.timers, {});
+    eq(h.engine._tickId, 0);
+    h.topics.delete(s);
+    eq(await h.logged(), []);
     h.done();
 });
 
