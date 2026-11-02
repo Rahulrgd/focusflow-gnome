@@ -18,7 +18,7 @@
 | 6  | Notifications, sound & panel label            | ✅ Done        | 58 unit tests; real finish, late finish, DND, off switches, icon-only panel verified headless; audible check pending |
 | 7  | Settings, auto-chain, shortcut, daily goal    | ✅ Done        | 30 prefs checks + real 1-min auto-start, Start Break, goal ✓, shortcut (virtual keyboard) verified headless |
 | 8  | Export / Import                               | ✅ Done        | 66 unit tests; 14 Backup-page checks + clear-timers shell test via scripts/headless.sh; file pickers manual check pending |
-| 9  | Lock screen, suspend, robustness & polish     | ⬜ Not started |       |
+| 9  | Lock screen, suspend, robustness & polish     | ✅ Done        | Lock-screen finish, overdue-after-suspend, broken files, 30k sessions, Tab nav, 10× enable cycles, ZorinBlue-Dark verified headless; real suspend/lock pending |
 | 10 | Packaging, testing & release                  | ⬜ Not started |       |
 
 Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⛔ Blocked
@@ -142,6 +142,7 @@ focusflow/
 ├── docs/
 │   ├── menu.png              # README ke liye screenshot (panel menu, teeno sections)
 │   ├── prefs.png             # README ke liye screenshot (Manage Topics)
+│   ├── menu-dark.png         # README ke liye screenshot (ZorinBlue-Dark theme)
 │   └── notification.png      # README ke liye screenshot (finish banner)
 ├── icons/
 │   └── focusflow-symbolic.svg
@@ -432,16 +433,32 @@ Study (1 min, goal 2m) → khud khatam → Break apne aap start (298 s bache), n
 ---
 
 ### Phase 9 — Lock screen, suspend, robustness & polish
-- [ ] Lock screen: engine chalta rahe, indicator hide; lock par finish → notification + sound unlock se pehle bhi
-- [ ] Suspend/resume: resume ke 1 s ke andar overdue timer finish ho, sahi end time ke saath
-- [ ] Shell restart / logout-login: running timer sahi remaining time se continue kare
-- [ ] `sessions.jsonl` missing ya kharab → extension crash na ho, warning log ho
-- [ ] Bada history (10k+ sessions) → menu kholne par lag na ho (cache + sirf zaroori period aggregate)
-- [ ] Light/dark theme dono me sahi colors (`stylesheet.css`, topic colors par readable text)
-- [ ] Saare buttons ke `accessible_name`, keyboard se menu navigate ho sake
-- [ ] Debug logs hatao; har module function par chhota JSDoc comment
+- [x] Lock screen: engine chalta rahe, indicator hide; lock par finish → notification + sound unlock se pehle bhi
+- [x] Suspend/resume: logind `PrepareForSleep(false)` par turant `checkFinished()` (GLib timeouts suspend me nahi chalte); warna bhi 1 s tick wall clock se pakadta; sahi end time ke saath, late = true
+- [x] Shell restart / logout-login: running timer sahi remaining time se continue kare *(Phase 2 me verified)*
+- [x] `sessions.jsonl` missing, folder, ya kharab lines → extension crash na ho, warning/error log ho
+- [x] Bada history (10k+ sessions) → menu kholne par lag na ho: naapa, optimization ki zaroorat nahi (neeche)
+- [x] Light/dark theme: default light shell theme aur aapka **ZorinBlue-Dark** dono me readable (`docs/menu-dark.png`)
+- [x] `accessible_name`: "Start Study" / "Pause Break" / "Reset Gaming", minutes box "Study: minutes"; Tab se poora menu chalta hai
+- [x] Debug logs: koi nahi; module functions par JSDoc comments pehle se
 
 **Done when:** Upar ka har scenario manually check ho chuka ho, aur `journalctl` saaf ho.
+
+**Result (2026-11-02):** Unit tests 66 passed. Sab headless checks `scripts/headless.sh` se, har run ke baad koi leftover process/folder nahi:
+- Lock screen (`unlock-dialog` mode): extension ACTIVE, indicator hidden; lock ke dauran timer khatam → chime + "Quick finished" notification; unlock par indicator wapas.
+- Suspend jaisa (wall clock end se 10 min aage): ~1 s me finish, "Ended at 21:43 · …", session 60 s, end time sahi (10 min pehle).
+- `sessions.jsonl` ki jagah folder → ACTIVE, menu khulta, start/pause chalte (session save fail hokar log hota). Kharab lines → skip, valid 2/2 load.
+- Performance (plain gjs): 10k sessions load 21 ms, aggregate 0.3–0.4 ms; 30k 51 ms / ≤0.9 ms; 100k 132 ms / ≤3 ms. Asli shell me 30k ke saath ek poora menu refresh (rows + All-time stats) **1.9 ms**.
+- Keyboard: Tab → har topic ka minutes box aur Start button → Manage Topics → Daily/Weekly/Monthly/All → ‹ (disabled buttons skip).
+- 10× disable/enable: 1 indicator, 0 bache notification sources, keybinding active.
+- ZorinBlue-Dark theme (aapka asli theme) load karke screenshot: text `#bde6fb` dark `#222b30` par, goal hara, deleted topic grey italic — sab readable.
+- Poore flow ke baad shell log me 0 JS errors/warnings.
+
+Manual check baaki: asli suspend/resume aur asli screen lock (headless me sirf simulate ho sakta hai).
+
+**Notes:**
+- Headless shell hamesha default light theme se chalta hai; dark check ke liye `Main.setThemeStylesheet(<theme css>); Main.loadTheme()` (User Themes extension jaisa).
+- `headless.sh` safal run ke baad shell log mita deta hai; log dekhna ho toh command ke andar `$FF_TEST_DIR/shell.log` padho.
 
 ---
 
@@ -595,3 +612,4 @@ Script andar se ye recipe follow karti hai (alag XDG dirs, asli desktop ko chhue
 | 2026-11-02 | 6     | Notifier (banner, Start Again, late finish), apna chime, icon-only panel mode, flush() fix, 58 unit tests, headless verified |
 | 2026-11-02 | 7     | Settings page, auto-start, Start Break, shortcut, daily goal; 4 prefs bugs fixed; leaked ibus-daemons band kiye, ab `scripts/headless.sh` |
 | 2026-11-02 | 8     | Backup page (JSON/CSV export, import Merge/Replace, Reset), lib/backup.js, clear-timers, transform(); 66 unit + 14 harness checks |
+| 2026-11-02 | 9     | Resume-from-suspend hook, topic-specific accessible names; lock/suspend/broken-file/perf/keyboard/dark-theme checks headless |

@@ -1,3 +1,4 @@
+import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
@@ -71,6 +72,16 @@ export default class FocusFlowExtension extends Extension {
             this);
         this._purgeTopics();
 
+        // GLib timeouts do not run during suspend; on resume, finish an overdue
+        // timer right away instead of on the next tick.
+        this._sleepSignalId = Gio.DBus.system.signal_subscribe('org.freedesktop.login1',
+            'org.freedesktop.login1.Manager', 'PrepareForSleep', '/org/freedesktop/login1', null,
+            Gio.DBusSignalFlags.NONE, (_conn, _sender, _path, _iface, _signal, params) => {
+                const [goingToSleep] = params.deepUnpack();
+                if (!goingToSleep)
+                    this._engine?.checkFinished();
+            });
+
         this._engine.checkFinished();
     }
 
@@ -123,6 +134,8 @@ export default class FocusFlowExtension extends Extension {
         // lock-screen support. Timer state is saved in GSettings and based on
         // the wall clock, so timers carry on across that and any real
         // disable/enable.
+        Gio.DBus.system.signal_unsubscribe(this._sleepSignalId);
+        this._sleepSignalId = 0;
         Main.wm.removeKeybinding('toggle-timer');
         this._settings.disconnectObject(this);
         this._engine.disconnectObject(this);
