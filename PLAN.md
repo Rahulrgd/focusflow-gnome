@@ -1,292 +1,478 @@
-# FocusFlow — Pomodoro / Time-Tracker Chrome Extension — Implementation Plan
+# FocusFlow — GNOME Shell Extension Plan
 
-> **Target:** Google Chrome on Zorin OS 18 (Linux), loaded unpacked from `chrome://extensions`
-> **Stack:** Manifest V3 · plain HTML/CSS/JS (ES modules) · no build step · Chart.js bundled locally
-> **Started:** 2026-11-02
+> Target: Zorin OS 18.1 · GNOME Shell 46 (Wayland) · GJS 1.80 · libadwaita 1.5
+> UUID: `focusflow@rahulrgd.github.io`
+> Schema: `org.gnome.shell.extensions.focusflow`
+> Started: 2026-11-02 · Branch: `step_1`
 
-**Status legend:** `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` skipped/deferred
+## Progress Tracker
 
-| Phase | Name | Status |
-|------:|------|--------|
-| 0 | Project setup & skeleton | `[ ]` |
-| 1 | Data model & storage layer | `[ ]` |
-| 2 | Timer engine (background) | `[ ]` |
-| 3 | Popup: Section 1 — Timers | `[ ]` |
-| 4 | Manage Topics page (options) | `[ ]` |
-| 5 | Stats & graphs (Section 3) | `[ ]` |
-| 6 | Notifications, sound & badge | `[ ]` |
-| 7 | Settings, auto-chain, shortcut, daily goal | `[ ]` |
-| 8 | Export / Import | `[ ]` |
-| 9 | Polish, theming & accessibility | `[ ]` |
-| 10 | Testing & release checklist | `[ ]` |
+| #  | Phase                                         | Status         | Notes |
+|----|-----------------------------------------------|----------------|-------|
+| 0  | Setup & skeleton                              | ⬜ Not started |       |
+| 1  | Data layer (topics, sessions, pure modules)   | ⬜ Not started |       |
+| 2  | Timer engine                                  | ⬜ Not started |       |
+| 3  | Panel indicator + Section 1 (Timers)          | ⬜ Not started |       |
+| 4  | Preferences: Manage Topics (Section 2)        | ⬜ Not started |       |
+| 5  | Stats & graph (Section 3)                     | ⬜ Not started |       |
+| 6  | Notifications, sound & panel label            | ⬜ Not started |       |
+| 7  | Settings, auto-chain, shortcut, daily goal    | ⬜ Not started |       |
+| 8  | Export / Import                               | ⬜ Not started |       |
+| 9  | Lock screen, suspend, robustness & polish     | ⬜ Not started |       |
+| 10 | Packaging, testing & release                  | ⬜ Not started |       |
+
+Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⛔ Blocked
 
 ---
 
-## Key design decisions (read before coding)
+## 1. Overview
 
-These are settled up front so later phases don't contradict each other.
+FocusFlow top panel me ek timer icon dikhata hai. Uske dropdown menu me teen sections hain:
 
-1. **Single source of truth = `chrome.storage.local`.** The popup and options page are just views: they read state, send commands to the background service worker, and re-render on `chrome.storage.onChanged`.
-2. **Timer state is timestamp-based, never tick-based.**
-   - Running: `{ topicId, status: "running", startedAt, remainingMsAtStart, durationMs }` → remaining = `remainingMsAtStart - (Date.now() - startedAt)`.
-   - Paused: `{ topicId, status: "paused", remainingMs, durationMs }`.
-   - The popup uses `requestAnimationFrame`/`setInterval` **only to redraw**, never to track time.
-3. **Finish detection uses a one-shot `chrome.alarms` alarm** with `when = finishTime`. Note: Chrome enforces a ~30 s minimum alarm delay, so if under 30 s remain, the popup (if open) finalizes the timer itself when it hits 0. The background also re-checks on service-worker startup (`runtime.onStartup` / first message) and finalizes overdue timers.
-4. **Sessions are logged per run segment.** Every time a timer stops running (pause, reset, preempted by another topic, or finish), a session entry is written for the time actually run. Only the segment that reaches 0 gets `completed: true`. This keeps the stats accurate even for paused/abandoned timers.
-5. **Sessions spanning midnight** are attributed to the day they started (simple; revisit only if it matters).
-6. **Sound in MV3** can't play from a service worker → use an **offscreen document** (`chrome.offscreen`, reason `AUDIO_PLAYBACK`).
-7. **Drag-and-drop** uses native HTML5 DnD (no library), with ▲/▼ buttons as a keyboard fallback.
-8. **All IDs** are generated with `crypto.randomUUID()`.
+1. **Timers:** har visible topic ki ek row: `Name | minutes | ▶ ⏸ ↺`
+2. **Manage Topics:** ek button jo preferences window kholta hai (add/edit/delete/hide/reorder)
+3. **Stats:** `Daily | Weekly | Monthly` tabs aur har topic ka total time bars me
 
-### Permissions (manifest)
-`storage`, `alarms`, `notifications`, `offscreen` (+ optionally `unlimitedStorage` if history grows large).
+Timer chalte waqt panel me icon ke saath countdown dikhta hai (jaise `Study 23:41`). Timer pura hone par desktop notification aur sound aata hai, aur session history me log ho jata hai. Ye sab browser se alag, poore desktop par kaam karta hai.
 
-### Target file structure
+### Architecture
+
+```
+┌──────────────────────── gnome-shell process ─────────────────────────┐
+│                                                                       │
+│  extension.js ──► Indicator (PanelMenu.Button)                        │
+│       │             ├─ panel: icon + "Study 23:41" label              │
+│       │             ├─ Section 1: TimerList (rows, scrollable)        │
+│       │             ├─ ── separator ──                                │
+│       │             ├─ Section 2: "Manage Topics" → openPreferences() │
+│       │             ├─ ── separator ──                                │
+│       │             └─ Section 3: StatsView (tabs, ‹ › , bars)        │
+│       │                                                               │
+│       ├─► TimerEngine (timestamps, 1 s tick, finish → events)         │
+│       ├─► Notifier (MessageTray source + sound)                       │
+│       ├─► SessionStore ──► ~/.local/share/focusflow/sessions.jsonl    │
+│       └─► Gio.Settings (topics, active timer, settings) ◄──┐          │
+└────────────────────────────────────────────────────────────┼──────────┘
+                                                             │ GSettings (dconf)
+┌──────────────────── prefs.js (alag gjs process) ───────────┼──────────┐
+│  Adw.PreferencesWindow                                     │          │
+│    ├─ Topics page   (add / edit / delete / hide / reorder) ┘          │
+│    ├─ Settings page (sound, notifications, week start, auto-chain…)   │
+│    └─ Backup page   (export / import JSON, export CSV)                │
+│                     └─► sessions.jsonl bhi padh/likh sakta hai        │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+### Key decisions
+
+**D1. `PanelMenu.Button` ya Quick Settings? → `PanelMenu.Button`**
+- Teen sections, inline minutes entry aur graph Quick Settings ke chhote toggle me fit nahi hote.
+- Apne menu me layout, width aur scroll par poora control milta hai.
+- Panel label me countdown dikha sakte hain. Chrome version ka "badge" yahi hai.
+
+**D2. Data kahan rakhein? → do jagah**
+- **GSettings:** topics (JSON string), active timer, saari settings. Ye chhota data hai, aur extension aur prefs (alag process) dono ise padh sakte hain. `changed` signal se dono taraf UI turant update hota hai.
+- **`~/.local/share/focusflow/sessions.jsonl`:** session history. Ye data hamesha badhta rahega, aur dconf bade data ke liye nahi bana. Har line ek session hai. Naya session file ke end me **append** hota hai, poori file dobara nahi likhni padti. Isliye crash me data kharab hone ka risk kam hai, aur prefs ke saath takraav bhi kam hai.
+- Delete-history aur import poori file dobara likhte hain (temp file + rename, `Gio.File.replace_contents`). Extension `Gio.FileMonitor` se file change dekh kar apna cache reload karta hai.
+
+**D3. Timer timestamps par chalega, ticks par nahi**
+- Running: `{ topicId, status: "running", startedAt, remainingMsAtStart, durationMs }` → remaining = `remainingMsAtStart - (Date.now() - startedAt)`.
+- Paused: `{ topicId, status: "paused", remainingMs, durationMs }`.
+- Ye state GSettings key `active-timer` me save hoti hai. Shell restart, extension disable/enable ya logout ke baad bhi timer sahi jagah se chalega.
+- 1-second `GLib.timeout_add_seconds` sirf UI redraw aur finish check ke liye hai. GLib ke timeouts suspend ke dauran ruk jaate hain, isliye har tick par **wall-clock** (`Date.now()`) se check karte hain ki timer khatam hua ya nahi.
+
+**D4. Ek waqt par ek hi timer.** Doosra topic start karne par pehla wala pause ho jata hai, aur uska ab tak ka time log ho jata hai.
+
+**D5. Session har "run segment" par log hoga**
+- Jab bhi timer rukta hai (pause, reset, doosra topic start, ya finish), us segment ka actual chala hua time ek session entry me jata hai.
+- Sirf wo segment jo 0 tak pahuncha, `completed: true` hota hai.
+- Isse adhure ya pause kiye timers ka time bhi graph me sahi aata hai.
+- Har session me `topicName` ka snapshot bhi save hoga, taaki delete ho chuke topic ka naam graph me dikh sake.
+- Midnight cross karne wala session us din me ginega jis din wo shuru hua tha (simple rakha hai).
+
+**D6. Lock screen → `session-modes: ["user", "unlock-dialog"]`**
+- Pomodoro chalate waqt screen lock karna aam baat hai. Lock par extension disable ho gaya toh timer ka notification/sound unlock ke baad hi aayega.
+- Isliye engine lock screen par bhi chalta rahega, par **indicator lock screen par hide** hoga (privacy + extension review rule). `Main.sessionMode` ke `updated` signal par handle karenge.
+
+**D7. Preferences window = Section 2 (Manage Topics)**
+- Shell menu me drag-and-drop, color picker aur confirmation dialog sahi se nahi bante. libadwaita (`Adw.PreferencesWindow`) me ye sab native milta hai.
+- Reorder: `Gtk.DragSource` + `Gtk.DropTarget` drag handle se, aur ▲/▼ buttons keyboard fallback ke liye.
+
+**D8. Graph menu me St widgets se banega, Cairo se nahi**
+- Har topic ki ek horizontal bar: `St.Bin` jiski width = `total / max × maxWidth`, background = topic color. Koi library nahi chahiye, aur theme ke saath achha dikhega.
+- Bada/detailed graph (stacked by day) baad me prefs ke Stats page me `Gtk.DrawingArea` + Cairo se ban sakta hai (backlog).
+
+**D9. Pure logic alag modules me**
+- `timerMath.js`, `stats.js`, `topicsModel.js` me koi Shell/GTK import nahi hoga. Inhe `gjs -m tests/run.js` se seedha terminal me test kar sakte hain, bina shell restart kiye.
+
+**D10. Sound** → `global.display.get_sound_player().play_from_file()` (extension ki apni `sounds/done.oga`). File nahi mili toh fallback `play_from_theme('complete', …)`.
+
+---
+
+## 2. Project Structure
+
 ```
 focusflow/
-├── manifest.json
-├── background.js              # service worker: timer engine, alarms, badge, notifications
-├── offscreen.html / .js       # plays the finish sound
-├── popup.html / .css / .js    # Section 1 (timers), Section 2 (button), Section 3 (stats)
-├── options.html / .css / .js  # Manage Topics + Settings + Export/Import
-├── modules/
-│   ├── storage.js             # read/write helpers, defaults, migrations
-│   ├── timer.js               # pure timer math (remaining, finish, segment → session)
-│   ├── stats.js               # aggregation by day/week/month, period navigation
-│   ├── topics.js              # CRUD + reorder + hide/show
-│   └── format.js              # MM:SS, "2h 15m", date labels
+├── PLAN.md
+├── README.md
+├── LICENSE
+├── metadata.json             # uuid, name, shell-version ["46"], session-modes, settings-schema
+├── extension.js              # Extension class: enable()/disable(), sab ko wire karta hai
+├── prefs.js                  # Adw.PreferencesWindow: Topics, Settings, Backup pages
+├── stylesheet.css            # rows, active row highlight, progress bar, stats bars
 ├── lib/
-│   └── chart.umd.min.js       # Chart.js v4, downloaded locally
+│   ├── indicator.js          # PanelMenu.Button, panel label, menu sections jodna
+│   ├── timerList.js          # Section 1: topic rows (name, minutes entry, buttons, progress)
+│   ├── statsView.js          # Section 3: tabs, ‹ › navigation, summary, bars
+│   ├── timerEngine.js        # start/pause/resume/reset, tick, finish, signals
+│   ├── sessionStore.js       # sessions.jsonl: append, read, rewrite, file monitor
+│   ├── topicsStore.js        # GSettings 'topics' JSON <-> objects, seed defaults
+│   ├── notifier.js           # MessageTray source, notifications + actions, sound
+│   ├── timerMath.js          # (pure) remaining, finished?, segment → session
+│   ├── stats.js              # (pure) period ranges, prev/next, aggregate
+│   ├── topicsModel.js        # (pure) validate, reorder, add/update/delete helpers
+│   └── format.js             # (pure) "MM:SS", "2h 15m", period labels
+├── prefs/
+│   ├── topicsPage.js         # list, drag reorder, ▲▼, edit dialog, hide, delete dialog
+│   ├── settingsPage.js       # sound, notifications, week start, auto-chain, shortcut
+│   └── backupPage.js         # export JSON/CSV, import (replace/merge)
 ├── sounds/
-│   └── done.mp3 (or .ogg)
-└── icons/
-    ├── icon16.png  icon32.png  icon48.png  icon128.png
+│   └── done.oga
+├── icons/
+│   └── focusflow-symbolic.svg
+├── schemas/
+│   └── org.gnome.shell.extensions.focusflow.gschema.xml
+├── tests/
+│   └── run.js                # gjs -m tests/run.js → pure modules ke unit tests
+└── scripts/
+    ├── install.sh            # schemas compile + ~/.local/share/gnome-shell/extensions me symlink
+    ├── nested.sh             # nested Wayland session
+    └── pack.sh               # gnome-extensions pack → dist/
 ```
 
-### Data schema (v1)
+### GSettings keys (draft)
+
+| Key                       | Type | Default              | Purpose |
+|---------------------------|------|----------------------|---------|
+| `schema-version`          | `i`  | `1`                  | Data migrations ke liye |
+| `topics`                  | `s`  | `'[]'`               | Topics ka JSON array (neeche dekho) |
+| `seeded`                  | `b`  | `false`              | Default topics ek baar hi add hon |
+| `active-timer`            | `s`  | `''`                 | Running/paused timer ka JSON, ya empty |
+| `last-topic-id`           | `s`  | `''`                 | Shortcut se kaunsa topic resume/start ho |
+| `sound-enabled`           | `b`  | `true`               | Finish par sound |
+| `notifications-enabled`   | `b`  | `true`               | Finish par notification |
+| `panel-show-countdown`    | `b`  | `true`               | Panel me `Study 23:41` label |
+| `week-start`              | `s`  | `'mon'`              | `mon` / `sun` |
+| `stats-period`            | `s`  | `'daily'`            | Menu me last chuna hua tab |
+| `auto-chain-enabled`      | `b`  | `false`              | Focus ke baad break auto start |
+| `auto-chain-from`         | `as` | `[]`                 | Kin topics ke baad chain ho |
+| `auto-chain-to`           | `s`  | `''`                 | Kaunsa topic start ho |
+| `toggle-timer`            | `as` | `['<Super><Alt>p']`  | Pause/resume shortcut |
+
+### Data shapes
+
 ```js
-// chrome.storage.local
-{
-  schemaVersion: 1,
-  topics: [
-    { id, name, minutes, color, hidden: false, order: 0, dailyGoalMinutes: null }
-  ],
-  sessions: [
-    { id, topicId, start, end, durationSeconds, completed }   // start/end = epoch ms
-  ],
-  activeTimer: null | { topicId, status, startedAt, remainingMsAtStart, remainingMs, durationMs },
-  settings: {
-    sound: true,
-    notifications: true,
-    weekStart: "mon",          // "mon" | "sun"
-    autoChain: { enabled: false, fromTopicIds: [], toTopicId: null }
-  }
-}
+// GSettings 'topics' (JSON string)
+[{ id, name, minutes, color: "#e66100", hidden: false, order: 0, dailyGoalMinutes: null }]
+
+// GSettings 'active-timer' (JSON string ya '')
+{ topicId, status: "running" | "paused", startedAt, remainingMsAtStart, remainingMs, durationMs }
+
+// ~/.local/share/focusflow/sessions.jsonl (har line ek JSON object)
+{ "id": "…", "topicId": "…", "topicName": "Study", "start": 1762070400000,
+  "end": 1762073100000, "seconds": 2700, "completed": true }
 ```
 
----
-
-## Phase 0 — Project setup & skeleton
-**Goal:** an extension that loads in Chrome with an empty popup and options page.
-
-- [ ] Create the folder structure above
-- [ ] Write `manifest.json` (MV3): `action.default_popup`, `options_page` (open in tab), `background.service_worker` with `"type": "module"`, permissions, icons
-- [ ] Add placeholder icons (16/32/48/128 px)
-- [ ] Download Chart.js v4 UMD build into `lib/chart.umd.min.js`
-  ```bash
-  curl -L -o lib/chart.umd.min.js https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js
-  ```
-- [ ] Stub `popup.html`, `options.html`, `background.js` with a console log each
-- [ ] Load unpacked at `chrome://extensions` (Developer mode ON → *Load unpacked* → select folder)
-
-**✅ Done when:** the icon appears in the toolbar, the popup opens, "Inspect service worker" shows the log with no errors.
+IDs `GLib.uuid_string_random()` se banenge. Default topics: Study 45, Break 5, Gaming 30, YouTube 15 (har ek ka alag color).
 
 ---
 
-## Phase 1 — Data model & storage layer
-**Goal:** reliable, tested read/write of all data in `modules/storage.js` + `modules/topics.js`.
+## 3. Phases
 
-- [ ] `getState()` / `setState(partial)` wrappers over `chrome.storage.local` (async/await)
-- [ ] `DEFAULTS` + seeding on `runtime.onInstalled` (reason `install`): Study 45, Break 5, Gaming 30, YouTube 15 — each with a distinct color
-- [ ] `schemaVersion` + `migrate(data)` function (no-op for v1, but wired in on `onInstalled` reason `update`)
-- [ ] Topic helpers: `addTopic`, `updateTopic`, `deleteTopic(id, { keepHistory })`, `reorderTopics(idsInOrder)`, `toggleHidden(id)`
-- [ ] Validation: name non-empty & trimmed, minutes integer 1–600, color valid hex
-- [ ] `addSession(session)` helper
-- [ ] `subscribe(callback)` helper wrapping `chrome.storage.onChanged`
+### Phase 0 — Setup & skeleton
+**Goal:** Ek khali extension jo nested session me enable ho jaye aur bina error ke disable ho jaye.
 
-**✅ Done when:** from the service-worker console you can add/edit/reorder/delete topics and see the stored JSON update correctly; reinstalling seeds defaults; updating does not wipe data.
+- [ ] `metadata.json` (`uuid`, `name`, `description`, `shell-version: ["46"]`, `session-modes`, `settings-schema`, `url`, `version-name`)
+- [ ] ESM `extension.js`: `export default class FocusFlowExtension extends Extension { enable() {} disable() {} }`
+- [ ] ESM `prefs.js`: `ExtensionPreferences` + `fillPreferencesWindow()` ek khali page ke saath
+- [ ] GSettings schema XML me upar ki saari keys, phir `glib-compile-schemas schemas/`
+- [ ] `scripts/install.sh`, `scripts/nested.sh`, `scripts/pack.sh` (background-music-player wale scripts jaise)
+- [ ] `.gitignore`: `schemas/gschemas.compiled`, `*.zip`, `dist/`
+- [ ] Symbolic panel icon `icons/focusflow-symbolic.svg`
 
----
-
-## Phase 2 — Timer engine (background)
-**Goal:** a timer that keeps running with the popup closed and survives the service worker sleeping.
-
-- [ ] Pure functions in `modules/timer.js`: `getRemainingMs(timer, now)`, `isFinished(timer, now)`, `segmentToSession(timer, now, completed)`
-- [ ] Message API in `background.js` (`runtime.onMessage`): `START(topicId)`, `PAUSE`, `RESUME`, `RESET(topicId)`, `GET_STATE`
-- [ ] **START** on a different topic while one is running → pause & log the current one first (only one runs at a time)
-- [ ] **START** on a fresh topic → `durationMs = topic.minutes * 60_000`
-- [ ] **PAUSE** → log the run segment (`completed: false`), store `remainingMs`, clear alarm
-- [ ] **RESET** → log the run segment if running, clear `activeTimer` and alarm
-- [ ] Schedule `chrome.alarms.create("timer-finish", { when })` on start/resume
-- [ ] `alarms.onAlarm` → finalize: log segment with `completed: true`, clear `activeTimer`, fire `FINISHED` event (hook for Phase 6/7)
-- [ ] On service-worker wake (`onStartup`, `onInstalled`, first message): if an overdue running timer exists → finalize it
-- [ ] Changing a topic's minutes while it's paused/running: decide & implement (recommended: affects the *next* start only)
-
-**✅ Done when:** start a 1-min timer → close popup → wait → session appears in storage with `completed: true`. Start, pause after 20 s → a 20 s `completed: false` session is logged. Restart Chrome mid-timer → it's finalized correctly.
+**Done when:** Nested session me `gnome-extensions enable focusflow@rahulrgd.github.io` chale, `gnome-extensions prefs …` window khule, aur `journalctl` me koi error na aaye.
 
 ---
 
-## Phase 3 — Popup: Section 1 (Timers) + Section 2 button
-**Goal:** the main UI for running timers.
+### Phase 1 — Data layer (topics, sessions, pure modules)
+**Goal:** Saara data padhna/likhna bharosemand ho, aur pure logic ke unit tests pass hon.
 
-- [ ] Popup layout: three stacked sections with dividers; fixed width (~360–400 px)
-- [ ] Render one row per **visible** topic, sorted by `order`: **Name | minutes input | ▶ ⏸ ↺**
-- [ ] Inline minutes `<input type="number" min="1" max="600">` → save on `change`/Enter, with validation
-- [ ] Active row: highlighted, live MM:SS countdown, progress bar (redraw every ~250 ms based on timestamps)
-- [ ] Button states: Play disabled while running, Pause disabled while paused, etc.; Play on a paused topic = resume
-- [ ] Re-render on `storage.onChanged` (so changes from the options page / background show instantly)
+- [ ] `topicsModel.js` (pure): `validateTopic`, `addTopic`, `updateTopic`, `deleteTopic`, `reorder(idsInOrder)`, `toggleHidden`, `visibleSorted`
+  - Name: trim, empty nahi, duplicate nahi (case-insensitive) · minutes: integer 1–600 · color: valid hex
+- [ ] `topicsStore.js`: GSettings `topics` ⇄ array, `changed::topics` signal, pehli baar `seeded = false` ho toh defaults daalo
+- [ ] `sessionStore.js`:
+  - [ ] `~/.local/share/focusflow/` folder banao (`GLib.get_user_data_dir()`)
+  - [ ] `append(session)`: async, `Gio.File.append_to_async`, ek line
+  - [ ] `loadAll()`: file padh kar parse karo, kharab line skip + warning
+  - [ ] `rewrite(sessions)`: temp + rename (`replace_contents_async`)
+  - [ ] `Gio.FileMonitor` → `changed` signal (prefs ne file badli toh cache reload)
+- [ ] `schema-version` + `migrate()` (v1 me no-op, par wired)
+- [ ] `tests/run.js`: chhota assert helper + `topicsModel` ke tests
+
+**Done when:** `gjs -m tests/run.js` pass ho. Looking Glass (`Alt+F2` → `lg`) se topics add/edit karne par `dconf read /org/gnome/shell/extensions/focusflow/topics` me sahi JSON dikhe, aur ek test session `sessions.jsonl` me likha jaye.
+
+---
+
+### Phase 2 — Timer engine
+**Goal:** UI ke bina, ek sahi chalne wala timer jo restart ke baad bhi apni jagah se chale.
+
+- [ ] `timerMath.js` (pure): `remainingMs(timer, now)`, `isFinished(timer, now)`, `finishAt(timer)`, `segmentToSession(timer, topic, now, completed)` + unit tests
+- [ ] `timerEngine.js` (GObject, signals: `changed`, `finished`):
+  - [ ] `start(topicId)`: koi aur chal raha hai toh pehle use pause + log karo
+  - [ ] `pause()`: segment log (`completed: false`), `remainingMs` save
+  - [ ] `resume()`: naya `startedAt`
+  - [ ] `reset(topicId)`: chal raha tha toh segment log, phir `active-timer = ''`
+  - [ ] 1 s tick sirf jab timer running ho; tick par `Date.now()` se finish check
+  - [ ] Finish: segment `completed: true` (end = `finishAt`, `now` nahi), `last-topic-id` set, `finished` signal
+- [ ] `enable()` par `active-timer` padho: running hai aur time nikal chuka hai → finish ko sahi end time ke saath log karo; baaki → tick dobara shuru
+- [ ] `disable()` par saare GLib sources aur signal handlers hatao (review requirement)
+- [ ] Decide: chalte timer ke minutes badle toh kya ho → **sirf agle start par lagega** (default)
+
+**Done when:** Looking Glass se 1 minute ka timer start karo, aur wo khatam hone par `sessions.jsonl` me `completed: true` aaye. 20 s baad pause karo → 20 s ka `completed: false` session aaye. Timer chalte hue extension disable/enable karo → remaining time sahi rahe.
+
+---
+
+### Phase 3 — Panel indicator + Section 1 (Timers)
+**Goal:** Menu se timers chala sakein.
+
+- [ ] `indicator.js`: `PanelMenu.Button`, icon + label (idle me sirf icon), `Main.panel.addToStatusArea(uuid, …, 0, 'right')`
+- [ ] Menu me teen sections + `PopupSeparatorMenuItem` (Section 3 abhi placeholder)
+- [ ] `timerList.js`: har visible topic (order se) ki row, custom `PopupBaseMenuItem`:
+  - [ ] Color dot · Name · minutes `St.Entry` · ▶ / ⏸ · ↺ (`St.Button` + symbolic icons)
+  - [ ] Minutes entry: sirf digits, Enter ya focus-out par validate + save, galat value par purani value wapas
+  - [ ] Active row: highlight, `MM:SS` countdown, neeche patli progress bar
+  - [ ] Button states: running me ▶ ki jagah ⏸; paused topic par ▶ = resume
+- [ ] Bahut topics hon toh Section 1 `St.ScrollView` me (max height ~ 6 rows)
+- [ ] Topics ya `active-timer` badle (prefs se bhi) toh rows re-render
 - [ ] Empty state: "No visible topics — open Manage Topics"
-- [ ] **Section 2:** "⚙ Manage Topics" button → `chrome.runtime.openOptionsPage()`
+- [ ] **Section 2:** "⚙ Manage Topics…" item → `this._extension.openPreferences()`, menu band ho
+- [ ] Panel par middle-click → pause/resume (chhota bonus)
 
-**✅ Done when:** you can run/pause/reset any topic from the popup; closing and reopening the popup shows the correct remaining time; starting a second topic pauses the first.
-
----
-
-## Phase 4 — Manage Topics page (options)
-**Goal:** full CRUD + ordering of topics in a dedicated tab.
-
-- [ ] Page layout: header, **"+ Add Topic"** button, topic list
-- [ ] Add/Edit form (inline row or small modal): name, minutes, color picker (`<input type="color">`)
-- [ ] Topic row: **⋮⋮ drag handle | ▲ ▼ | color swatch | Name | minutes | Edit | Hide/Show | Delete**
-- [ ] Native HTML5 drag-and-drop reordering → `reorderTopics()`
-- [ ] ▲/▼ buttons for keyboard reordering
-- [ ] Hide/Show toggle with clear visual state (e.g. dimmed row + "hidden" tag)
-- [ ] Delete with an in-page confirmation dialog (not `alert/confirm`) offering **Keep history** / **Delete history**
-- [ ] Deleting the currently active topic → reset the timer first
-- [ ] Prevent duplicate names (case-insensitive) — warn the user
-
-**✅ Done when:** add, edit, reorder (drag + buttons), hide/show and delete all work and are reflected instantly in an open popup.
+**Done when:** Menu se kisi bhi topic ko run/pause/reset kar sakein. Menu band karke dobara kholne par sahi remaining time dikhe. Doosra topic start karne par pehla pause ho jaye.
 
 ---
 
-## Phase 5 — Stats & graphs (Section 3)
-**Goal:** bar chart of time per topic for Daily / Weekly / Monthly.
+### Phase 4 — Preferences: Manage Topics (Section 2)
+**Goal:** Topics ka poora add/edit/delete/hide/reorder prefs window me.
 
-- [ ] `modules/stats.js`:
-  - [ ] `getPeriodRange(type, anchorDate, weekStart)` → `{ start, end, label }`
-  - [ ] `shiftPeriod(type, anchorDate, ±1)` for Prev/Next
-  - [ ] `aggregate(sessions, range)` → `[{ topicId, seconds }]`, total seconds, completed count
-- [ ] Tabs: **Daily | Weekly | Monthly | All time**
-- [ ] **‹ Prev / label / Next ›** navigation (disable Next beyond the current period)
-- [ ] Summary line: total time (e.g. "5h 20m") + completed sessions count
-- [ ] Chart.js horizontal or vertical bar chart: one bar per topic with logged time, bar color = topic color, tooltip shows "2h 15m"
-- [ ] Deleted topics with kept history → shown as "(deleted) Name" in gray
-- [ ] Empty state: "No time logged for this period"
-- [ ] Destroy & recreate (or `update()`) the chart when switching tabs to avoid leaks
-- [ ] *(Optional)* Weekly stacked-by-day view
+- [ ] `prefs/topicsPage.js`: `Adw.PreferencesPage` → upar **"+ Add Topic"** button, neeche topics ki list
+- [ ] Har row (`Adw.ActionRow`): drag handle (`list-drag-handle-symbolic`) · ▲ ▼ · color swatch · Name · "45 min" · Edit · Hide/Show · Delete
+- [ ] Add/Edit dialog (`Adw.Dialog`): `Adw.EntryRow` (name), `Adw.SpinRow` (minutes, 1–600), `Gtk.ColorDialogButton` (color), daily goal (Phase 7 me)
+- [ ] Drag-and-drop reorder: `Gtk.DragSource` on handle + `Gtk.DropTarget` on rows → `reorder()`
+- [ ] Hide/Show toggle: hidden row dim + "Hidden" tag; hidden topics graph me dikhte rahenge
+- [ ] Delete: `Adw.AlertDialog` → **Keep history** / **Delete history** / Cancel
+  - [ ] Active topic delete ho raha hai → pehle timer reset (extension `topics` change par khud handle kare)
+  - [ ] Delete history → `sessionStore.rewrite()` bina us topic ke
+- [ ] Duplicate naam par error message (`Adw.Toast`)
 
-**✅ Done when:** charts match the raw session data for today, this week and this month; navigating to past periods works; week start respects the setting.
+**Done when:** Add, edit, reorder (drag + buttons), hide/show aur delete sab kaam karein, aur khula hua panel menu turant update ho.
 
 ---
 
-## Phase 6 — Notifications, sound & badge
-**Goal:** feedback when timers run and finish.
+### Phase 5 — Stats & graph (Section 3)
+**Goal:** Menu me har topic ka total time, Daily / Weekly / Monthly.
 
-- [ ] `chrome.notifications.create` on finish: "Study finished — 45 min logged" (respect `settings.notifications`)
-- [ ] Clicking the notification → open the popup's stats or just clear it
-- [ ] Offscreen document plays `sounds/done.mp3` on finish (respect `settings.sound`); create it on demand, close it after playback
-- [ ] Badge: `chrome.action.setBadgeText` with remaining minutes (e.g. "23") + badge color = topic color
-- [ ] Badge refresh: periodic alarm (`periodInMinutes: 0.5`) while a timer runs; also update on every state change
-- [ ] Paused state badge: "⏸" or "II"; clear the badge when idle
-- [ ] Verify Linux/GNOME desktop notifications appear (check Zorin's *Do Not Disturb* if they don't)
+- [ ] `stats.js` (pure) + unit tests:
+  - [ ] `periodRange(type, anchor, weekStart)` → `{ start, end, label }`
+  - [ ] `shiftPeriod(type, anchor, ±1)`
+  - [ ] `aggregate(sessions, range)` → `[{ topicId, name, color, seconds }]` (zero wale nahi), `totalSeconds`, `completedCount`
+- [ ] `statsView.js`:
+  - [ ] Tabs: **Daily | Weekly | Monthly | All** (toggle `St.Button`s), last tab `stats-period` me yaad rahe
+  - [ ] **‹  label  ›** navigation; current period ke aage `›` disabled
+  - [ ] Summary: "Total 5h 20m · 6 completed"
+  - [ ] Har topic ki horizontal bar: name · color bar · "2h 15m", sabse zyada time upar
+  - [ ] Delete ho chuke topic (history rakhi) → `topicName` + grey color + "(deleted)"
+  - [ ] Empty state: "No time logged for this period"
+- [ ] Stats sirf tab recompute hon jab menu khule, period badle, ya naya session aaye (har tick par nahi)
+- [ ] Chal raha segment bhi (abhi tak ka time) live total me jode (optional, achha lagega)
 
-**✅ Done when:** finishing a timer with the popup closed shows a desktop notification, plays the sound, and the badge counts down correctly.
-
----
-
-## Phase 7 — Settings, auto-chain, keyboard shortcut, daily goal
-**Goal:** the "extra features" from the spec.
-
-- [ ] Settings panel on the options page: sound on/off, notifications on/off, week start (Mon/Sun)
-- [ ] **Auto-chain:** enable toggle + "after [focus topics…] start [break topic]" → hooked into the `FINISHED` event
-- [ ] **Keyboard shortcut:** `commands` in manifest, e.g. `toggle-timer` → pause/resume the active (or last-used) timer
-  - [ ] Document that shortcuts can be changed at `chrome://extensions/shortcuts`
-- [ ] **Daily goal:** optional `dailyGoalMinutes` per topic (in the Add/Edit form); small progress indicator on the popup row (e.g. "40 / 120 min today")
-
-**✅ Done when:** each setting persists across restarts and visibly changes behavior; the shortcut works with the popup closed.
+**Done when:** Aaj, is hafte aur is mahine ke totals `sessions.jsonl` ke raw data se match karein. Pichhle periods par jaana kaam kare. Week start setting ka asar dikhe.
 
 ---
 
-## Phase 8 — Export / Import
-**Goal:** backups and portability.
+### Phase 6 — Notifications, sound & panel label
+**Goal:** Timer khatam hone par saaf feedback.
 
-- [ ] **Export JSON:** full dump (`schemaVersion`, topics, sessions, settings) → download `pomodoro-backup-YYYY-MM-DD.json`
-- [ ] **Export CSV:** sessions with topic name, start, end, duration (min), completed
-- [ ] **Import JSON:** file picker → validate shape → run `migrate()` → preview counts → choose **Replace** or **Merge** (dedupe by `id`)
-- [ ] Clear error messages for invalid files
-- [ ] *(Optional)* "Reset all data" with a strong confirmation
+- [ ] `notifier.js`: GNOME 46 API → `new MessageTray.Source({ title: 'FocusFlow', iconName })`, `Main.messageTray.add(source)`, `new MessageTray.Notification({ source, title, body })`
+- [ ] Finish par: "Study finished — 45 min logged" (`notifications-enabled` ka dhyan)
+- [ ] Notification actions: **Start Break** (agar auto-chain ka break topic set hai) · **Restart**
+- [ ] Sound: `sounds/done.oga` play, fallback theme sound `complete` (`sound-enabled` ka dhyan)
+- [ ] Panel label: running `Study 23:41` · paused `⏸ Study 12:05` · idle sirf icon; `panel-show-countdown` off ho toh sirf icon + chhota dot
+- [ ] Label ki fixed width (tabular numbers) taaki panel hilta na rahe
+- [ ] `disable()` par notification source destroy
 
-**✅ Done when:** export → delete all data → import restores everything identically; the CSV opens correctly in LibreOffice Calc.
-
----
-
-## Phase 9 — Polish, theming & accessibility
-- [ ] CSS variables for colors; `prefers-color-scheme` light/dark
-- [ ] Consistent spacing, rounded cards, readable fonts; check popup doesn't overflow
-- [ ] All buttons have `aria-label`/`title`; visible focus outlines; full keyboard navigation
-- [ ] Final icons (a tomato/clock design) at all sizes
-- [ ] Remove debug logs; add short JSDoc comments to every module function
-- [ ] `README.md`: features, install steps, shortcut, backup instructions
-
-**✅ Done when:** looks right in both light and dark mode, and everything is usable with keyboard only.
+**Done when:** Menu band ho tab bhi timer khatam hone par notification aaye, sound baje, aur panel label sahi countdown dikhaye. Zorin ka Do Not Disturb on ho toh banner na aaye, par notification list me dikhe.
 
 ---
 
-## Phase 10 — Testing & release checklist
+### Phase 7 — Settings, auto-chain, shortcut, daily goal
+**Goal:** Extra features.
 
-### Manual test cases
-| # | Test | Expected | Pass |
-|---|------|----------|------|
-| 1 | Start 1-min timer, close popup, wait | Notification + sound; session `completed: true` | [ ] |
-| 2 | Start timer, restart Chrome before it ends | Timer continues / finalizes correctly after restart | [ ] |
-| 3 | Start A, then start B | A paused + partial session logged; B running | [ ] |
-| 4 | Pause after 30 s, then reset | 30 s partial session logged; timer idle | [ ] |
-| 5 | Edit minutes inline in popup | Saved; used on next start | [ ] |
-| 6 | Reorder topics via drag and via ▲/▼ | Order persists and shows in popup | [ ] |
-| 7 | Hide a topic with history | Gone from Section 1; still in graphs | [ ] |
-| 8 | Delete topic, keep history | Shows as "(deleted)" in graphs | [ ] |
-| 9 | Delete topic, delete history | Removed from graphs | [ ] |
-| 10 | Daily / Weekly / Monthly / All time tabs | Totals match raw sessions | [ ] |
-| 11 | Prev/Next period navigation | Correct ranges; week start respected | [ ] |
-| 12 | Badge while running / paused / idle | Minutes / pause sign / empty | [ ] |
-| 13 | Auto-chain Study → Break | Break starts automatically | [ ] |
-| 14 | Keyboard shortcut with popup closed | Toggles pause/resume | [ ] |
-| 15 | Export JSON → wipe → import | Data restored identically | [ ] |
-| 16 | Import an invalid file | Friendly error, no data change | [ ] |
-| 17 | Light & dark system theme | Both readable | [ ] |
-| 18 | Extension reload (update) | No data loss; migration runs | [ ] |
+- [ ] `prefs/settingsPage.js`: sound, notifications, panel countdown, week start (`Adw.ComboRow`)
+- [ ] **Auto-chain:** switch + "After" topics (multi-select checkboxes) + "Start" topic (`Adw.ComboRow`); engine ke `finished` signal par hook
+- [ ] **Keyboard shortcut:** `Main.wm.addKeybinding('toggle-timer', settings, Meta.KeyBindingFlags.NONE, Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, …)`
+  - [ ] Running → pause · paused → resume · idle → `last-topic-id` start
+  - [ ] `disable()` me `Main.wm.removeKeybinding('toggle-timer')`
+  - [ ] Prefs me shortcut badalne ke liye `Adw.EntryRow` (accelerator text, `Gtk.accelerator_parse` se validate); asli "press keys" capture baad me
+- [ ] **Daily goal:** topic edit dialog me optional goal (minutes); Section 1 row me "40 / 120 min" + chhoti progress
 
-### Release
-- [ ] All tests above pass
-- [ ] No errors in service-worker, popup and options consoles
-- [ ] Version bumped in `manifest.json`
-- [ ] Backup exported before any future upgrade
+**Done when:** Har setting restart ke baad bhi rahe aur behaviour sach me badle. Shortcut menu band hone par bhi kaam kare.
 
 ---
 
-## Future ideas (backlog)
-- [ ] Sync across devices via `chrome.storage.sync` (topics/settings only, sessions too large)
-- [ ] Long-break after every N focus sessions (classic Pomodoro cycle)
-- [ ] Streaks & heatmap calendar view
-- [ ] Tags/categories (e.g. "productive" vs "leisure") with grouped stats
-- [ ] Count-up / stopwatch mode for open-ended tasks
-- [ ] Session notes ("what did I work on?")
-- [ ] Website blocking during focus topics (`declarativeNetRequest`)
-- [ ] Companion GNOME Shell extension showing the active timer in the top panel
+### Phase 8 — Export / Import
+**Goal:** Backup aur restore.
+
+- [ ] `prefs/backupPage.js`
+- [ ] **Export JSON:** `{ schemaVersion, exportedAt, topics, settings, sessions }` → `Gtk.FileDialog.save()` → `focusflow-backup-YYYY-MM-DD.json`
+- [ ] **Export CSV:** `date, topic, start, end, minutes, completed`
+- [ ] **Import JSON:** file choose → shape validate → `migrate()` → preview ("6 topics, 412 sessions") → **Replace** ya **Merge** (`id` se dedupe)
+- [ ] Galat file par saaf error, data me koi badlaav nahi
+- [ ] (Optional) **Reset all data**, strong confirmation ke saath
+
+**Done when:** Export → saara data delete → import karne par sab kuchh pehle jaisa wapas aaye. CSV LibreOffice Calc me sahi khule.
 
 ---
 
-## Progress log
-| Date | Phase | Notes |
-|------|-------|-------|
-| 2026-11-02 | — | Plan created |
+### Phase 9 — Lock screen, suspend, robustness & polish
+- [ ] Lock screen: engine chalta rahe, indicator hide; lock par finish → notification + sound unlock se pehle bhi
+- [ ] Suspend/resume: resume ke 1 s ke andar overdue timer finish ho, sahi end time ke saath
+- [ ] Shell restart / logout-login: running timer sahi remaining time se continue kare
+- [ ] `sessions.jsonl` missing ya kharab → extension crash na ho, warning log ho
+- [ ] Bada history (10k+ sessions) → menu kholne par lag na ho (cache + sirf zaroori period aggregate)
+- [ ] Light/dark theme dono me sahi colors (`stylesheet.css`, topic colors par readable text)
+- [ ] Saare buttons ke `accessible_name`, keyboard se menu navigate ho sake
+- [ ] Debug logs hatao; har module function par chhota JSDoc comment
+
+**Done when:** Upar ka har scenario manually check ho chuka ho, aur `journalctl` saaf ho.
+
+---
+
+### Phase 10 — Packaging, testing & release
+- [ ] `scripts/pack.sh` → `dist/focusflow@rahulrgd.github.io.shell-extension.zip` (`--extra-source` lib, prefs, sounds, icons; `--schema`)
+- [ ] `README.md`: features, screenshot, install, shortcut, backup, logs
+- [ ] `LICENSE` (GPL-2.0-or-later, background-music-player jaisa)
+- [ ] Fresh install test: zip se `gnome-extensions install`, logout/login, enable
+- [ ] Neeche wale saare test cases pass
+- [ ] `version-name: "1.0.0"`, git tag `v1.0.0`
+
+#### Manual test cases
+
+| #  | Test | Expected | Pass |
+|----|------|----------|------|
+| 1  | 1-min timer start, menu band, wait | Notification + sound; session `completed: true` | [ ] |
+| 2  | Timer chalte hue logout/login | Sahi remaining time se continue | [ ] |
+| 3  | Timer chalte hue screen lock | Lock par bhi finish par sound; indicator lock screen par nahi dikhe | [ ] |
+| 4  | Timer chalte hue suspend, phir resume | Overdue timer turant finish, sahi end time | [ ] |
+| 5  | A start, phir B start | A pause + partial session log; B running | [ ] |
+| 6  | 30 s baad pause, phir reset | 30 s ka partial session; timer idle | [ ] |
+| 7  | Menu me minutes edit | Save; agle start par lage | [ ] |
+| 8  | Prefs me drag aur ▲/▼ se reorder | Order save, menu turant update | [ ] |
+| 9  | History wale topic ko hide | Section 1 se gayab; graph me dikhe | [ ] |
+| 10 | Delete + keep history | Graph me "(deleted) Name" | [ ] |
+| 11 | Delete + delete history | Graph se hat jaye | [ ] |
+| 12 | Daily / Weekly / Monthly / All tabs | Totals raw sessions se match | [ ] |
+| 13 | ‹ › navigation | Sahi ranges; week start ka dhyan | [ ] |
+| 14 | Panel label running / paused / idle | `Study 23:41` / `⏸ …` / sirf icon | [ ] |
+| 15 | Auto-chain Study → Break | Break khud start ho | [ ] |
+| 16 | Shortcut, menu band | Pause/resume toggle | [ ] |
+| 17 | Export → wipe → import | Data same wapas | [ ] |
+| 18 | Galat file import | Saaf error, data same | [ ] |
+| 19 | Light aur dark theme | Dono me readable | [ ] |
+| 20 | Extension disable/enable 10 baar | Koi leak/duplicate indicator nahi, journal saaf | [ ] |
+
+---
+
+## 4. Development & Testing Workflow
+
+### Install (dev mode)
+```bash
+./scripts/install.sh      # schemas compile + repo ko extensions folder me symlink
+```
+
+### Nested Wayland session
+Wayland par shell restart (`Alt+F2 → r`) nahi hota, isliye har code change ke baad nested session use karo:
+```bash
+./scripts/nested.sh
+# andar ke terminal se:
+gnome-extensions enable focusflow@rahulrgd.github.io
+```
+Asli session me test karna ho toh logout/login karna padega.
+
+### Logs
+```bash
+journalctl -f -o cat /usr/bin/gnome-shell     # extension.js ke logs
+journalctl -f -o cat /usr/bin/gjs             # prefs.js ke logs
+```
+
+### Unit tests (pure modules)
+```bash
+gjs -m tests/run.js
+```
+
+### Data dekhna
+```bash
+dconf dump /org/gnome/shell/extensions/focusflow/
+tail -n 5 ~/.local/share/focusflow/sessions.jsonl
+```
+
+### Release zip
+```bash
+./scripts/pack.sh
+```
+
+### Useful tools
+- Looking Glass: `Alt+F2` → `lg` (shell ke andar JS chala kar objects dekhna)
+- `gnome-extensions prefs focusflow@rahulrgd.github.io`
+- `gnome-extensions info focusflow@rahulrgd.github.io` (state aur errors)
+
+---
+
+## 5. Risks & Known Limitations
+
+- **Popup menu me text entry:** menu ka keyboard grab kabhi-kabhi `St.Entry` focus me dikkat deta hai. Fallback: minutes ke liye −/+ buttons (5 min step) aur scroll se badalna.
+- **Lock screen par chalna:** extension review me `unlock-dialog` ka reason batana padta hai. Indicator hide karna zaroori hai.
+- **Prefs aur extension dono `sessions.jsonl` likhte hain:** extension sirf append karta hai, prefs sirf rewrite (delete/import). Dono ek hi pal me likhein toh ek append kho sakta hai. Bahut kam chance; FileMonitor reload ke baad extension apne pending sessions dobara check karega.
+- **Zorin ka custom panel (Zorin Taskbar):** panel ki position/space alag ho sakti hai. Real session me ek baar dekhna.
+- **GNOME version:** sirf Shell 46 target. Zorin future me GNOME upgrade kare toh MessageTray / prefs API check karne padenge.
+
+---
+
+## 6. Open Questions (abhi ke default assumptions)
+
+| Sawal | Default |
+|-------|---------|
+| Chalte timer ke minutes badle toh? | Agle start par lagega |
+| Midnight cross karne wala session? | Start wale din me ginega |
+| Weekly view stacked-by-day chahiye? | Abhi nahi (backlog, prefs Stats page) |
+| Shortcut default? | `Super+Alt+P` |
+| Panel me countdown hamesha? | Haan, setting se band kar sakte hain |
+
+---
+
+## 7. Backlog (future ideas)
+- [ ] Prefs me bada Stats page (`Gtk.DrawingArea` + Cairo): stacked-by-day, heatmap calendar, streaks
+- [ ] Classic Pomodoro cycle: har N focus sessions ke baad long break
+- [ ] Count-up / stopwatch mode
+- [ ] Session notes ("kya kaam kiya?")
+- [ ] Tags/categories (productive vs leisure) ke hisaab se stats
+- [ ] Focus ke dauran Do Not Disturb khud on karna
+- [ ] Quick Settings me ek chhota toggle (current timer pause/resume)
+
+---
+
+## Progress Log
+
+| Date       | Phase | Notes |
+|------------|-------|-------|
+| 2026-11-02 | —     | Plan bana (Chrome version se GNOME Shell extension par switch) |
