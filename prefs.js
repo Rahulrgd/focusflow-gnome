@@ -2,6 +2,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 
 import {SessionStore} from './lib/sessionStore.js';
 import {TopicsStore} from './lib/topicsStore.js';
+import {BackupPage} from './prefs/backupPage.js';
 import {SettingsPage} from './prefs/settingsPage.js';
 import {TopicsPage} from './prefs/topicsPage.js';
 
@@ -13,7 +14,8 @@ export default class FocusFlowPreferences extends ExtensionPreferences {
         window.set_default_size(620, 680);
 
         const topics = new TopicsStore(settings);
-        // Read-only here (session counts for the delete dialog); the shell writes it.
+        // The shell appends to it; here it is read (delete dialog, export) and
+        // rewritten only by import and reset (backupPage.js).
         const sessions = new SessionStore();
         sessions.monitor();
         sessions.load().catch(e => console.error(`FocusFlow prefs: loading sessions failed: ${e.message}`));
@@ -22,6 +24,7 @@ export default class FocusFlowPreferences extends ExtensionPreferences {
         window.add(topicsPage);
         const settingsPage = new SettingsPage({window, settings, topics});
         window.add(settingsPage);
+        window.add(new BackupPage({window, settings, topics, sessions}));
 
         window.connect('close-request', () => {
             topicsPage.disconnectAll();

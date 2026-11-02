@@ -33,6 +33,12 @@
       <description>Written by the preferences window before it deletes a topic with "Delete with History". The shell drops the topic's timer without logging it, removes its sessions and clears this list.</description>
     </key>
 
+    <key name="clear-timers" type="b">
+      <default>false</default>
+      <summary>Drop all timers without logging them</summary>
+      <description>Set by the preferences window before it replaces or resets all data. The shell drops every running and paused timer without logging it, then sets this back to false.</description>
+    </key>
+
     <key name="last-topic-id" type="s">
       <default>''</default>
       <summary>Last used topic</summary>

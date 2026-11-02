@@ -5,6 +5,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import {exit} from 'system';
 
+import * as Backup from '../lib/backup.js';
 import {formatClock, formatDuration} from '../lib/format.js';
 import * as Model from '../lib/topicsModel.js';
 import {migrateData, migrateSettings, SCHEMA_VERSION} from '../lib/migrate.js';
@@ -816,6 +817,120 @@ test('stats aggregate: range by start time, totals, deleted topics, sort', () =>
     eq([out.totalSeconds, out.completedCount], [2940, 3]);
     eq(Stats.aggregate([], day, topics), {rows: [], totalSeconds: 0, completedCount: 0});
     eq(Stats.aggregate(sessions, Stats.periodRange('all', 0), topics).totalSeconds, 2940 + 1998);
+});
+
+// ---- backup ----
+
+test('backup: build -> parse round trip', () => {
+    const topics = seeded();
+    const sessions = [session(1, {topicId: topics[0].id}), session(2, {topicId: topics[1].id, completed: false})];
+    const text = JSON.stringify(Backup.buildBackup({topics, sessions, settings: {'week-start': 'sun'}, now: T0}));
+    const back = Backup.parseBackup(text);
+    eq(back.topics, Model.sortTopics(topics));
+    eq(back.sessions, sessions);
+    eq([back.settings['week-start'], back.exportedAt, back.skippedTopics, back.skippedSessions],
+        ['sun', new Date(T0).toISOString(), 0, 0]);
+});
+
+test('backup.parseBackup: rejects non-backups, counts invalid entries', () => {
+    throws(() => Backup.parseBackup('{oops'), /not valid JSON/);
+    throws(() => Backup.parseBackup('[]'), /not a FocusFlow backup/);
+    throws(() => Backup.parseBackup(JSON.stringify({app: 'other', topics: [], sessions: []})), /not a FocusFlow backup/);
+    throws(() => Backup.parseBackup(JSON.stringify({app: 'focusflow', topics: []})), /no topics or sessions/);
+    throws(() => Backup.parseBackup(JSON.stringify({app: 'focusflow', schemaVersion: 99, topics: [], sessions: []})), /newer FocusFlow/);
+    const back = Backup.parseBackup(JSON.stringify({
+        app: 'focusflow',
+        topics: [{id: 'a', name: 'A', minutes: 5, color: '#000000'}, {id: 'b', name: '', minutes: 5, color: '#000000'}],
+        sessions: [session(1), session(1), {id: 'x'}, session(2)],
+        settings: 'nope',
+    }));
+    eq([back.topics.map(t => t.id), back.sessions.map(x => x.id), back.skippedTopics, back.skippedSessions, back.settings],
+        [['a'], ['s1', 's2'], 1, 2, {}]);
+});
+
+test('backup.mergeTopics: keeps local, adds new ids, renames clashes', () => {
+    const localTopics = seeded();
+    const topic = (id, name, order) => ({id, name, minutes: 10, color: '#111111', hidden: false, dailyGoalMinutes: null, order});
+    const imported = [
+        {...localTopics[0], name: 'Study renamed elsewhere'},
+        topic('n1', 'study', 0),
+        topic('n2', 'Chess', 1),
+        topic('n3', 'x'.repeat(40), 2),
+        topic('n4', 'x'.repeat(40), 3),
+    ];
+    const {topics, added} = Backup.mergeTopics(localTopics, imported);
+    eq(added, 4);
+    eq(topics.slice(0, 4), localTopics, 'local topics untouched');
+    eq(topics.slice(4).map(t => [t.id, t.name, t.order]),
+        [['n1', 'study (2)', 4], ['n2', 'Chess', 5], ['n3', 'x'.repeat(40), 6], ['n4', `${'x'.repeat(36)} (2)`, 7]]);
+    assert(topics.every(t => Model.validateTopic(t, topics).length === 0), 'all valid, no duplicate names');
+    eq(Backup.mergeTopics(localTopics, localTopics).added, 0);
+});
+
+test('backup.mergeSessions: union by id, local wins, sorted', () => {
+    const mine = [session(3), session(1, {seconds: 99})];
+    const {sessions, added} = Backup.mergeSessions(mine, [session(1), session(2)]);
+    eq([sessions.map(x => x.id), sessions[0].seconds, added], [['s1', 's2', 's3'], 99, 1]);
+});
+
+test('backup.sessionsToCsv: local time, quoting, sorted', () => {
+    const topics = [{id: 't1', name: 'Study'}];
+    const rows = [
+        session(2, {start: local(2026, 11, 2, 9, 5), end: local(2026, 11, 2, 9, 50), seconds: 2700}),
+        session(1, {topicId: 'gone', topicName: 'Chess, "blitz"', start: local(2026, 11, 1, 23, 30),
+            end: local(2026, 11, 2, 0, 10), seconds: 2400, completed: false}),
+    ];
+    eq(Backup.sessionsToCsv(rows, topics),
+        'date,start,end,topic,minutes,completed\n' +
+        '2026-11-01,23:30,00:10,"Chess, ""blitz""",40.0,no\n' +
+        '2026-11-02,09:05,09:50,Study,45.0,yes\n');
+    eq(Backup.sessionsToCsv([]), 'date,start,end,topic,minutes,completed\n');
+});
+
+test('backup settings: read, apply, skip bad values', () => {
+    const settings = memorySettings();
+    settings.set_string('week-start', 'sun');
+    settings.set_strv('toggle-timer', ['<Ctrl>F9']);
+    const values = Backup.readSettings(settings);
+    eq([values['week-start'], values['toggle-timer'], values['sound-enabled'], 'timers' in values],
+        ['sun', ['<Ctrl>F9'], true, false]);
+    const other = memorySettings();
+    Backup.applySettings(other, {...values, 'sound-enabled': false, 'week-start': 'friday', 'stats-period': 42, 'timers': '{"x":1}'});
+    eq([other.get_string('week-start'), other.get_strv('toggle-timer'), other.get_boolean('sound-enabled'),
+        other.get_string('stats-period'), other.get_string('timers')],
+    ['mon', ['<Ctrl>F9'], false, 'daily', '{}'], 'bad range/type and unknown keys skipped');
+});
+
+test('SessionStore.transform: reloads first, writes only on change', async () => {
+    const path = tmpPath('transform.jsonl');
+    const store = new SessionStore(path);
+    await store.append(session(1));
+    const other = new SessionStore(path);
+    await other.append(session(2));
+    let seen = null;
+    await store.transform(list => {
+        seen = list.map(x => x.id);
+        return list;
+    });
+    eq(seen, ['s1', 's2'], 'sees the other process write');
+    await store.transform(list => [...list, session(3)]);
+    const reread = new SessionStore(path);
+    await reread.load();
+    eq(reread.sessions.map(x => x.id), ['s1', 's2', 's3']);
+    await rejects(store.transform(list => [...list, {id: 'bad'}]), /Invalid session/);
+    [store, other, reread].forEach(x => x.destroy());
+});
+
+test('engine.forgetAll: drops every timer, logs nothing', async () => {
+    const h = makeEngine('forgetall');
+    h.engine.start(h.id('Break'));
+    h.time.now += MIN;
+    h.engine.start(h.id('Study'));
+    h.time.now += MIN;
+    h.engine.forgetAll();
+    eq([h.engine.timers, h.engine._tickId], [{}, 0]);
+    eq((await h.logged()).map(x => x.topicName), ['Break'], 'only the earlier pause was logged');
+    h.done();
 });
 
 // ---- format ----

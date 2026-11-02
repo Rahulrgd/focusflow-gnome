@@ -19,6 +19,13 @@ export default class FocusFlowExtension extends Extension {
         this._topics = new TopicsStore(this._settings);
         this._topics.seedIfNeeded();
 
+        // A "replace all data" from the preferences window while the shell was not
+        // running: drop the old timers before the engine loads them.
+        if (this._settings.get_boolean('clear-timers')) {
+            this._settings.set_string('timers', '{}');
+            this._settings.set_boolean('clear-timers', false);
+        }
+
         this._sessions = new SessionStore();
         this._sessions.monitor();
         this._sessions.load().catch(e => console.error(`${this.uuid}: loading sessions failed: ${e.message}`));
@@ -58,10 +65,24 @@ export default class FocusFlowExtension extends Extension {
         Main.wm.addKeybinding('toggle-timer', this._settings, Meta.KeyBindingFlags.NONE,
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._engine.toggle());
 
-        this._settings.connectObject('changed::purge-topic-ids', () => this._purgeTopics(), this);
+        this._settings.connectObject(
+            'changed::purge-topic-ids', () => this._purgeTopics(),
+            'changed::clear-timers', () => this._clearTimers(),
+            this);
         this._purgeTopics();
 
         this._engine.checkFinished();
+    }
+
+    /**
+     * Import (Replace) and "Reset all data" set this before swapping all topics,
+     * so running timers are dropped instead of logged into the new history.
+     */
+    _clearTimers() {
+        if (!this._settings.get_boolean('clear-timers'))
+            return;
+        this._engine.forgetAll();
+        this._settings.set_boolean('clear-timers', false);
     }
 
     /**

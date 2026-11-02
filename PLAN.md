@@ -17,7 +17,7 @@
 | 5  | Stats & graph (Section 3)                     | ✅ Done        | 57 unit tests (3 timezones); seeded history driven in headless shell + screenshots |
 | 6  | Notifications, sound & panel label            | ✅ Done        | 58 unit tests; real finish, late finish, DND, off switches, icon-only panel verified headless; audible check pending |
 | 7  | Settings, auto-chain, shortcut, daily goal    | ✅ Done        | 30 prefs checks + real 1-min auto-start, Start Break, goal ✓, shortcut (virtual keyboard) verified headless |
-| 8  | Export / Import                               | ⬜ Not started |       |
+| 8  | Export / Import                               | ✅ Done        | 66 unit tests; 14 Backup-page checks + clear-timers shell test via scripts/headless.sh; file pickers manual check pending |
 | 9  | Lock screen, suspend, robustness & polish     | ⬜ Not started |       |
 | 10 | Packaging, testing & release                  | ⬜ Not started |       |
 
@@ -136,7 +136,7 @@ focusflow/
 ├── prefs/
 │   ├── topicsPage.js         # list, drag reorder, ▲▼, edit dialog, hide, delete dialog
 │   ├── settingsPage.js       # sound, notifications, week start, auto-chain, shortcut
-│   └── backupPage.js         # export JSON/CSV, import (replace/merge)
+│   └── backupPage.js         # export JSON/CSV, import (replace/merge), reset all
 ├── sounds/
 │   └── done.oga              # apna chime, scripts/make-sound.py se bana
 ├── docs/
@@ -165,6 +165,7 @@ focusflow/
 | `seeded`                  | `b`  | `false`              | Default topics ek baar hi add hon |
 | `timers`                  | `s`  | `'{}'`               | Topic id → running/paused timer ka JSON map (max ek running) |
 | `purge-topic-ids`         | `as` | `[]`                 | "Delete History" ki request: prefs likhta hai, shell purge karke khali karta hai |
+| `clear-timers`            | `b`  | `false`              | Import Replace / Reset ki request: shell saare timers bina log kiye hatata hai, phir `false` |
 | `last-topic-id`           | `s`  | `''`                 | Shortcut se kaunsa topic resume/start ho |
 | `sound-enabled`           | `b`  | `true`               | Finish par sound |
 | `notifications-enabled`   | `b`  | `true`               | Finish par notification |
@@ -410,14 +411,23 @@ Study (1 min, goal 2m) → khud khatam → Break apne aap start (298 s bache), n
 ### Phase 8 — Export / Import
 **Goal:** Backup aur restore.
 
-- [ ] `prefs/backupPage.js`
-- [ ] **Export JSON:** `{ schemaVersion, exportedAt, topics, settings, sessions }` → `Gtk.FileDialog.save()` → `focusflow-backup-YYYY-MM-DD.json`
-- [ ] **Export CSV:** `date, topic, start, end, minutes, completed`
-- [ ] **Import JSON:** file choose → shape validate → `migrate()` → preview ("6 topics, 412 sessions") → **Replace** ya **Merge** (`id` se dedupe)
-- [ ] Galat file par saaf error, data me koi badlaav nahi
-- [ ] (Optional) **Reset all data**, strong confirmation ke saath
+- [x] `prefs/backupPage.js` (naya "Backup" page) + `lib/backup.js` (pure: build/parse, merge, CSV, settings)
+- [x] **Export JSON:** `{ app: "focusflow", schemaVersion, exportedAt, topics, settings, sessions }` → `Gtk.FileDialog.save()` → `focusflow-backup-YYYY-MM-DD.json` (settings me sirf user settings, timers jaisi runtime state nahi)
+- [x] **Export CSV:** `date,start,end,topic,minutes,completed` (local time, comma/quote wale naam quoted) → `focusflow-history-YYYY-MM-DD.csv`
+- [x] **Import JSON:** file choose → `parseBackup()` (app check, `migrate()`, invalid topics/sessions skip + ginti) → preview ("4 topics and 3 sessions, exported …") → **Replace** ya **Merge**
+  - [x] Merge: local sab waisa hi; naye id wale topics aage jude (naam takraaye toh "Study (2)"); sessions id se union; local settings waise hi
+  - [x] Replace: `clear-timers` request → sessions, topics, settings backup se
+- [x] Galat file (JSON nahi / FocusFlow ka nahi / missing) par toast, data me koi badlaav nahi
+- [x] **Reset all data**: destructive confirm → `clear-timers`, history khali, settings default, default topics (naye ids)
 
 **Done when:** Export → saara data delete → import karne par sab kuchh pehle jaisa wapas aaye. CSV LibreOffice Calc me sahi khule.
+
+**Result (2026-11-02):** Unit tests 66 passed (IST + New York). Backup page harness (`scripts/headless.sh` ke andar) 14/14: JSON export (4 topics, 3 sessions, settings), CSV export · data badal kar Import → preview · Merge (Local bacha, delete kiya Break wapas same id se, sessions union, settings same; dobara Merge kuchh nahi jodta) · Replace (bilkul backup jaisa) · galat/tooti/missing file reject · Reset confirm, Cancel, Reset (defaults, khali history) · **Reset ke baad backup se sab wapas** (same ids). CSV Python `csv` module se saaf parse hua. Shell test: `clear-timers` ke bina chalte timer ka segment "restored" history me ghus jata (dikhaya), ke saath nahi; extension band hote hue request → enable par handle. Koi leftover process/folder nahi. File chooser dialogs (portal) aur LibreOffice me CSV kholna manual check baaki.
+
+**Notes:**
+- **Design:** import/reset bhi prefs se hi hote hain (shell ko file bhejne ki zaroorat nahi), par `clear-timers` request se shell pehle saare timers chhod deta hai; dconf changes order me aate hain, isliye shell ye topics badalne se pehle dekhta hai.
+- `SessionStore.transform(fn)`: reload + change + write ek hi queue slot me; `removeTopics()` ab isi par bana.
+- Harness `headless.sh` ke andar asli shell (FocusFlow enabled) ke saath chalta hai, isliye `clear-timers` request shell ne sach me handle kiya (pehle test galti se `true` expect kar raha tha).
 
 ---
 
@@ -542,7 +552,7 @@ Script andar se ye recipe follow karti hai (alag XDG dirs, asli desktop ko chhue
 
 - **Popup menu me text entry:** menu ka keyboard grab kabhi-kabhi `St.Entry` focus me dikkat deta hai. Fallback: minutes ke liye −/+ buttons (5 min step) aur scroll se badalna.
 - **Lock screen par chalna:** extension review me `unlock-dialog` ka reason batana padta hai. Indicator hide karna zaroori hai.
-- **Prefs aur extension dono `sessions.jsonl` likhte hain:** delete-history ka race Phase 4 me `purge-topic-ids` se khatam kiya (purge shell hi karta hai, apni write queue me). Import (Phase 8) abhi bhi prefs se rewrite karega; usi waqt shell append kare toh ek session kho sakta hai. Phase 8 me import bhi shell se karwana ya rewrite se pehle reload karna (`removeTopics` jaisa) decide karna hai.
+- **Prefs aur extension dono `sessions.jsonl` likhte hain:** delete-history ka race Phase 4 me `purge-topic-ids` se khatam kiya. Phase 8: Replace/Reset se pehle `clear-timers` request (shell timers ko bina log kiye hatata hai), Merge `transform()` se (usi queue slot me reload + write). Bacha hua chhota risk: Merge ke reload aur rename ke beech (milliseconds) shell koi session append kare toh wo kho sakta hai.
 - **Zorin ka custom panel (Zorin Taskbar):** panel ki position/space alag ho sakti hai. Real session me ek baar dekhna.
 - **GNOME version:** sirf Shell 46 target. Zorin future me GNOME upgrade kare toh MessageTray / prefs API check karne padenge.
 
@@ -584,3 +594,4 @@ Script andar se ye recipe follow karti hai (alag XDG dirs, asli desktop ko chhue
 | 2026-11-02 | 5     | stats.js + StatsView (tabs, ‹ ›, bars, live), color palette, BinLayout y_expand fix, 57 unit tests (3 TZ), headless verified |
 | 2026-11-02 | 6     | Notifier (banner, Start Again, late finish), apna chime, icon-only panel mode, flush() fix, 58 unit tests, headless verified |
 | 2026-11-02 | 7     | Settings page, auto-start, Start Break, shortcut, daily goal; 4 prefs bugs fixed; leaked ibus-daemons band kiye, ab `scripts/headless.sh` |
+| 2026-11-02 | 8     | Backup page (JSON/CSV export, import Merge/Replace, Reset), lib/backup.js, clear-timers, transform(); 66 unit + 14 harness checks |
